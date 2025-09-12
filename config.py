@@ -1,5 +1,6 @@
 # Configuration pour l'agent RL de gestion de portefeuille
 import numpy as np
+import torch
 from datetime import datetime
 
 class Config:
@@ -81,8 +82,8 @@ class Config:
     MODEL_DIR = "models/"
     RESULTS_DIR = "results/"
     
-    # Paramètres de performance
-    DEVICE = "cuda"  # ou "cpu"
+    # Paramètres de performance - GPU par défaut avec fallback CPU
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     NUM_WORKERS = 4
     
     @classmethod

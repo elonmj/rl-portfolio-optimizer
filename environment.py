@@ -113,12 +113,21 @@ class PortfolioEnv(gym.Env):
         if self.data_handler.dividends_data is not None:
             for i, ticker in enumerate(self.valid_tickers):
                 if ticker in self.data_handler.dividends_data.columns:
-                    # Approximation: dividende moyen réparti sur l'année
-                    mean_dividend = self.data_handler.dividends_data[ticker].mean()
-                    if not np.isnan(mean_dividend):
-                        # Répartir le dividende annuel sur 52 semaines
-                        weekly_dividend = mean_dividend / 52
-                        dividends_matrix[:, i] = weekly_dividend
+                    try:
+                        # Convertir en numérique et nettoyer
+                        dividend_series = pd.to_numeric(
+                            self.data_handler.dividends_data[ticker], 
+                            errors='coerce'
+                        )
+                        # Approximation: dividende moyen réparti sur l'année
+                        mean_dividend = dividend_series.mean()
+                        if not np.isnan(mean_dividend) and mean_dividend > 0:
+                            # Répartir le dividende annuel sur 52 semaines
+                            weekly_dividend = mean_dividend / 52
+                            dividends_matrix[:, i] = weekly_dividend
+                    except Exception as e:
+                        print(f"⚠️ Erreur dividendes pour {ticker}: {e}")
+                        # Garder 0 par défaut
         
         return dividends_matrix
     
