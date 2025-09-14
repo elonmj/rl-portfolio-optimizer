@@ -92,8 +92,8 @@ class PerformanceAnalyzer:
             # Equal weight allocation (buy and hold)
             num_assets = len(env.tickers)
             equal_weights = np.ones(num_assets) / num_assets
-            action = np.zeros(num_assets + 1)  # +1 for cash
-            action[:num_assets] = equal_weights
+            action = equal_weights # <-- Correct, la taille correspond à ce que l'environnement attend
+
             
             portfolio_values = [Config.INITIAL_CASH]
             returns = []
@@ -298,72 +298,45 @@ class PerformanceAnalyzer:
         print(metrics_df.T.to_string())
         print("="*80)
 
-def load_trained_agent(model_path: str, data_handler: DataHandler, use_replay_buffer: bool = False) -> SACAgent:
-    """Charge un agent SAC entraîné avec dimensions adaptatives."""
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# evaluate_v2.py
+
+def load_trained_agent(model_path: str) -> SACAgent:
+    """Charge un agent SAC entraîné en lisant d'abord sa configuration."""
+    device = torch.device('mps') if torch.backends.mps.is_available() else torch.device('cpu')
+
+    if not Path(model_path).exists():
+        logger.warning(f"Fichier modèle non trouvé: {model_path}. Utilisation d'un modèle non entraîné par défaut.")
+        # Créer un agent par défaut si aucun modèle n'est trouvé
+        return SACAgent(num_assets=10, state_dim=231, action_dim=10, device=device)
+
+    # 1. Charger le checkpoint pour lire la configuration
+    checkpoint = torch.load(model_path, map_location=device)
     
-    # Load data first
-    data_handler.load_all_data()
+    # Vérifier si la configuration de l'agent est dans le checkpoint
+    if 'agent_config' not in checkpoint:
+        raise ValueError("Le fichier modèle ne contient pas 'agent_config'. Veuillez ré-entraîner le modèle avec le code mis à jour.")
+
+    agent_config = checkpoint['agent_config']
+    num_assets = agent_config['num_assets']
+    state_dim = agent_config['state_dim']
+    action_dim = agent_config['action_dim']
     
-    # Get some tickers to determine dimensions
-    sample_tickers = data_handler.get_available_tickers_for_period(
-        Config.TRAIN_START, Config.TRAIN_END, min_observations=100
-    )
-    
-    if not sample_tickers:
-        # Try with fewer observations
-        sample_tickers = data_handler.get_available_tickers_for_period(
-            Config.TRAIN_START, Config.TRAIN_END, min_observations=50
-        )
-    
-    if not sample_tickers:
-        # Use all available tickers
-        sample_tickers = data_handler.available_tickers[:Config.MAX_ASSETS]
-    
-    if not sample_tickers:
-        raise ValueError("Aucun ticker disponible pour créer l'agent")
-    
-    # Limit the number of assets for evaluation to save memory
-    max_assets_for_eval = min(10, Config.MAX_ASSETS)
-    sample_tickers = sample_tickers[:max_assets_for_eval]
-    
-    # Create temporary environment to get dimensions
-    temp_env = PortfolioEnv(
-        tickers=sample_tickers,
-        start_date=Config.TRAIN_START,
-        end_date=Config.TRAIN_END,
-        data_handler=data_handler
-    )
-    
-    # Get actual dimensions from environment
-    state, _ = temp_env.reset()
-    state_dim = state.shape[0]
-    action_dim = temp_env.action_space.shape[0]
-    num_assets = len(temp_env.valid_tickers)
-    
-    logger.info(f"Dimensions détectées: state_dim={state_dim}, action_dim={action_dim}, num_assets={num_assets}")
-    
-    # Use SACAgent directly (no need for separate SimpleEvaluationAgent)
+    logger.info(f"Configuration du modèle chargé: num_assets={num_assets}, state_dim={state_dim}, action_dim={action_dim}")
+
+    # 2. Créer l'agent avec la BONNE architecture
     agent = SACAgent(
         num_assets=num_assets,
         state_dim=state_dim,
         action_dim=action_dim,
         device=device
     )
-    
-    # Load saved state if exists
-    if Path(model_path).exists():
-        try:
-            checkpoint = torch.load(model_path, map_location=device)
-            agent.models.actor.load_state_dict(checkpoint['actor_state_dict'])
-            agent.models.critic1.load_state_dict(checkpoint['critic1_state_dict'])
-            agent.models.critic2.load_state_dict(checkpoint['critic2_state_dict'])
-            logger.info(f"Modèle chargé depuis: {model_path}")
-        except Exception as e:
-            logger.warning(f"Erreur lors du chargement du modèle: {e}. Utilisation d'un modèle non entraîné.")
-    else:
-        logger.warning(f"Modèle non trouvé: {model_path}. Utilisation d'un modèle non entraîné.")
-    
+
+    # 3. Charger les poids dans l'architecture maintenant correcte
+    try:
+        agent.load(model_path)
+    except Exception as e:
+        logger.warning(f"Erreur lors du chargement des poids du modèle: {e}. L'agent pourrait être partiellement initialisé.")
+
     return agent
 
 def evaluate_model(model_path: str = "models/sac_portfolio_agent.pth", use_replay_buffer: bool = False):
@@ -376,7 +349,7 @@ def evaluate_model(model_path: str = "models/sac_portfolio_agent.pth", use_repla
         data_handler.load_all_data()  # Important: charger les données
         
         # Load trained agent with consistent dimensions
-        agent = load_trained_agent(model_path, data_handler, use_replay_buffer)
+        agent = load_trained_agent(model_path)
         
         # Get the number of assets the agent was trained with
         agent_num_assets = agent.num_assets

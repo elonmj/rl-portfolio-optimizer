@@ -15,10 +15,18 @@ import copy
 from config import Config
 from models import SACModels
 
+import torch
+
+# Vérifier si MPS est disponible (GPU Apple)
+device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+print(f"Device utilisé : {device}")
+
+
+
 class ReplayBuffer:
     """Buffer de replay pour SAC"""
     
-    def __init__(self, capacity: int, state_dim: int, action_dim: int, device: str = "cpu"):
+    def __init__(self, capacity: int, state_dim: int, action_dim: int, device: torch.device = device):
         self.capacity = capacity
         self.device = device
         self.position = 0
@@ -74,7 +82,7 @@ class SACAgent:
                  num_assets: int,
                  state_dim: int,
                  action_dim: int,
-                 device: str = "cpu",
+                 device: torch.device = device,
                  target_entropy: Optional[float] = None):
         
         self.num_assets = num_assets
@@ -342,7 +350,7 @@ def test_agent():
         num_assets=num_assets,
         state_dim=state_dim,
         action_dim=action_dim,
-        device="cpu"
+        device=device
     )
     
     # Simuler quelques transitions
@@ -382,7 +390,7 @@ def test_agent():
     agent.save(save_path)
     
     # Créer un nouvel agent et charger
-    new_agent = SACAgent(num_assets, state_dim, action_dim, device="cpu")
+    new_agent = SACAgent(num_assets, state_dim, action_dim, device=device)
     new_agent.load(save_path)
     
     # Vérifier que les actions sont similaires

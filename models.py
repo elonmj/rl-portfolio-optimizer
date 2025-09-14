@@ -323,11 +323,17 @@ class CriticWithAttention(nn.Module):
         
         return q_value
 
+import torch
+
+# Vérifier si MPS est disponible (GPU Apple)
+device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+print(f"Device utilisé : {device}")
+
 
 class SACModels:
     """Conteneur pour tous les modèles SAC"""
     
-    def __init__(self, num_assets: int, device: str = "cpu"):
+    def __init__(self, num_assets: int, device: torch.device = device):
         self.num_assets = num_assets
         self.device = device
         
@@ -351,8 +357,13 @@ class SACModels:
             param.requires_grad = False
         
         # Paramètre d'entropie (apprenable)
-        self.log_alpha = torch.tensor(np.log(Config.INITIAL_ALPHA), 
-                                    requires_grad=True, device=device)
+        self.log_alpha = torch.tensor(
+            np.log(Config.INITIAL_ALPHA), 
+            dtype=torch.float32, 
+            device=device, 
+            requires_grad=True
+        )
+
         
         print(f"✅ Modèles SAC initialisés avec {num_assets} assets")
         print(f"   Actor parameters: {sum(p.numel() for p in self.actor.parameters()):,}")

@@ -81,9 +81,17 @@ class Config:
     LOG_DIR = "logs/"
     MODEL_DIR = "models/"
     RESULTS_DIR = "results/"
+    import torch
+
+    
+
     
     # Paramètres de performance - GPU par défaut avec fallback CPU
-    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    DEVICE = (
+        torch.device("mps") if torch.backends.mps.is_available()
+        else torch.device("cpu")
+    )
+    print(f"Device utilisé : {DEVICE}")
     NUM_WORKERS = 4
     
     @classmethod

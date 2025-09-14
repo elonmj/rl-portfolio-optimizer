@@ -11,15 +11,27 @@ Utilisation: python demo_complete.py
 """
 
 import warnings
-warnings.filterwarnings('ignore')
+import logging
+import os
+import torch
 
 from train import PortfolioTrainer
 from evaluate_v2 import evaluate_model
-import logging
 
-# Configuration du logging pour un affichage propre
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+# Désactiver les warnings inutiles
+warnings.filterwarnings("ignore")
+
+# Configuration du logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
+
+# Détection du device (MPS > CUDA > CPU)
+if torch.backends.mps.is_available():
+    DEVICE = "mps"
+elif torch.cuda.is_available():
+    DEVICE = "cuda"
+else:
+    DEVICE = "cpu"
 
 def run_complete_demo():
     """Exécute une démonstration complète du système."""
@@ -28,6 +40,8 @@ def run_complete_demo():
     print("     SAC PORTFOLIO OPTIMIZER - DÉMONSTRATION COMPLÈTE")
     print("🚀" + "="*60 + "🚀")
     print()
+    print(f"⚙️  Device utilisé : {DEVICE}")
+    print()
     
     # ========================================
     # PHASE 1: ENTRAÎNEMENT RAPIDE
@@ -35,31 +49,32 @@ def run_complete_demo():
     print("📈 PHASE 1: ENTRAÎNEMENT DE L'AGENT SAC")
     print("-" * 50)
     
-    # Configuration pour test rapide (10 épisodes)
     config_overrides = {
-        'MAX_EPISODES': 10,
-        'EVAL_FREQUENCY': 5,
-        'SAVE_FREQUENCY': 20,
-        'BATCH_SIZE': 128,
-        'MAX_STEPS_PER_EPISODE': 100,  # Réduire pour test rapide
+        "DEVICE": DEVICE,              # <-- correction pour forcer le bon device
+        "EVAL_FREQUENCY": 5,
+        "SAVE_FREQUENCY": 20,
+        "BATCH_SIZE": 128,
+        "MAX_STEPS_PER_EPISODE": 100,  # Réduit pour test rapide
     }
+    
+    model_path = "models/sac_portfolio_agent.pth"
     
     try:
         trainer = PortfolioTrainer(config_overrides)
-        print('🧠 Démarrage de l\'entraînement (10 épisodes)...')
+        print("🧠 Démarrage de l'entraînement (5 épisodes)...")
         
-        metrics = trainer.train(num_episodes=10)
+        metrics = trainer.train(num_episodes=5)
         
-        print('✅ Entraînement terminé avec succès!')
-        if metrics and 'total_return' in metrics and metrics['total_return']:
-            final_return = metrics['total_return'][-1]
-            print(f'📊 Retour final d\'entraînement: {final_return:.2%}')
+        print("✅ Entraînement terminé avec succès!")
+        if metrics and "total_return" in metrics and metrics["total_return"]:
+            final_return = metrics["total_return"][-1]
+            print(f"📊 Retour final d'entraînement: {final_return:.2%}")
         
-        print('💾 Modèle sauvegardé dans: models/sac_portfolio_agent.pth')
+        print(f"💾 Modèle sauvegardé dans: {model_path}")
         
     except Exception as e:
-        print(f'❌ Erreur lors de l\'entraînement: {e}')
-        print('Continuons avec l\'évaluation d\'un modèle non-entraîné...')
+        print(f"❌ Erreur lors de l'entraînement: {e}")
+        print("⚠️  Continuons avec l'évaluation d'un modèle non-entraîné...")
     
     print()
     
@@ -70,20 +85,22 @@ def run_complete_demo():
     print("-" * 50)
     
     try:
-        print('🔍 Évaluation sur les périodes validation et test...')
+        print("🔍 Évaluation sur les périodes validation et test...")
         
-        # Évaluation avec replay buffer si GPU disponible
-        results = evaluate_model(use_replay_buffer=True)
+        # Vérifier que le modèle existe
+        eval_model_path == "models/final_model.pth"
+        
+        results = evaluate_model(model_path=eval_model_path)
         
         if results:
-            print('✅ Évaluation terminée avec succès!')
+            print("✅ Évaluation terminée avec succès!")
             print()
             print("📈 RÉSULTATS OBTENUS:")
             print("=" * 30)
             
             for period, metrics in results.items():
-                if 'Agent' in period:
-                    period_name = period.replace('Agent_', '')
+                if "Agent" in period:
+                    period_name = period.replace("Agent_", "")
                     print(f"\n🎯 Période {period_name}:")
                     print(f"   • Rendement total: {metrics.get('total_return', 0):.2%}")
                     print(f"   • Rendement annualisé: {metrics.get('annualized_return', 0):.2%}")
@@ -95,10 +112,10 @@ def run_complete_demo():
             print(f"📋 Métriques détaillées dans: results/metrics_summary.csv")
             
         else:
-            print('⚠️  Évaluation n\'a pas retourné de résultats')
+            print("⚠️  Évaluation n'a pas retourné de résultats")
             
     except Exception as e:
-        print(f'❌ Erreur lors de l\'évaluation: {e}')
+        print(f"❌ Erreur lors de l'évaluation: {e}")
         import traceback
         traceback.print_exc()
     
@@ -112,7 +129,7 @@ def run_complete_demo():
     print("🎉" + "="*60 + "🎉")
     print()
     print("📁 Fichiers générés:")
-    print("   • models/sac_portfolio_agent.pth - Modèle entraîné")
+    print(f"   • {model_path} - Modèle entraîné")
     print("   • results/performance_analysis.png - Graphiques de performance")
     print("   • results/metrics_summary.csv - Métriques détaillées")
     print("   • logs/ - Logs d'entraînement")

@@ -41,13 +41,18 @@ class TrainingLogger:
             'cvar': []
         }
         
+    # train.py -> class TrainingLogger
+
     def log_episode(self, episode: int, metrics: Dict):
-        """Enregistre les métriques d'un épisode"""
+        """Enregistre les métriques d'un épisode de manière robuste"""
         self.metrics['episode'].append(episode)
-        for key, value in metrics.items():
-            if key in self.metrics:
-                self.metrics[key].append(value)
-    
+        # Parcourir toutes les clés de métriques possibles
+        for key in self.metrics:
+            if key != 'episode':
+                # Utiliser .get(key, None) pour ajouter la valeur si elle existe, ou None sinon.
+                # Cela garantit que toutes les listes ont la même longueur.
+                self.metrics[key].append(metrics.get(key, None))
+        
     def save_metrics(self):
         """Sauvegarde les métriques en CSV"""
         df = pd.DataFrame(self.metrics)
@@ -146,7 +151,7 @@ class PortfolioTrainer:
         )
         
         # Limiter le nombre de tickers pour l'entraînement
-        max_tickers = min(len(train_tickers), 15)  # Maximum 15 tickers
+        max_tickers = min(len(train_tickers), 6)  # Maximum 6 tickers
         self.train_tickers = train_tickers[:max_tickers]
         
         print(f"   Tickers sélectionnés pour l'entraînement: {len(self.train_tickers)}")
@@ -184,25 +189,34 @@ class PortfolioTrainer:
     def setup_agent(self):
         """Configure l'agent SAC"""
         print("🤖 Configuration de l'agent SAC...")
-        
+
         if self.train_env is None:
             raise ValueError("Environnement d'entraînement non configuré")
-        
+
         # Dimensions
         num_assets = len(self.train_tickers)
         state_dim = self.train_env.observation_space.shape[0]
         action_dim = self.train_env.action_space.shape[0]
-        
-        # Créer l'agent
-        device = "cuda" if torch.cuda.is_available() and Config.DEVICE == "cuda" else "cpu"
-        print(f"   Utilisation du device: {device}")
-        
+
+        # Sélection du device
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+            print("⚡ Utilisation du device: MPS (Metal Performance Shaders)")
+        elif torch.cuda.is_available():
+            device = torch.device("cuda")
+            print("⚡ Utilisation du device: CUDA (GPU Nvidia)")
+        else:
+            device = torch.device("cpu")
+            print("⚠️ Utilisation du device: CPU (pas de GPU disponible)")
+
+        # Création de l'agent
         self.agent = SACAgent(
             num_assets=num_assets,
             state_dim=state_dim,
             action_dim=action_dim,
             device=device
         )
+
     
     def train_episode(self, episode: int) -> Dict:
         """Entraîne l'agent sur un épisode"""
