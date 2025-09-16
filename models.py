@@ -323,17 +323,14 @@ class CriticWithAttention(nn.Module):
         
         return q_value
 
-import torch
-
-# Vérifier si MPS est disponible (GPU Apple)
-device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
-print(f"Device utilisé : {device}")
-
+from config import Config
 
 class SACModels:
     """Conteneur pour tous les modèles SAC"""
     
-    def __init__(self, num_assets: int, device: torch.device = device):
+    def __init__(self, num_assets: int, device: torch.device = None):
+        if device is None:
+            device = Config.init_device()
         self.num_assets = num_assets
         self.device = device
         

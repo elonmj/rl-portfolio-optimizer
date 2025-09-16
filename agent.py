@@ -15,29 +15,23 @@ import copy
 from config import Config
 from models import SACModels
 
-import torch
-
-# Vérifier si MPS est disponible (GPU Apple)
-device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
-print(f"Device utilisé : {device}")
-
-
-
 class ReplayBuffer:
     """Buffer de replay pour SAC"""
     
-    def __init__(self, capacity: int, state_dim: int, action_dim: int, device: torch.device = device):
+    def __init__(self, capacity: int, state_dim: int, action_dim: int, device: torch.device = None):
+        if device is None:
+            device = Config.init_device()
         self.capacity = capacity
         self.device = device
         self.position = 0
         self.size = 0
         
         # Pré-allouer les tensors pour l'efficacité
-        self.states = torch.zeros(capacity, state_dim, device=device)
-        self.actions = torch.zeros(capacity, action_dim, device=device)
-        self.rewards = torch.zeros(capacity, 1, device=device)
-        self.next_states = torch.zeros(capacity, state_dim, device=device)
-        self.dones = torch.zeros(capacity, 1, dtype=torch.bool, device=device)
+        self.states = torch.zeros(capacity, state_dim, device=self.device)
+        self.actions = torch.zeros(capacity, action_dim, device=self.device)
+        self.rewards = torch.zeros(capacity, 1, device=self.device)
+        self.next_states = torch.zeros(capacity, state_dim, device=self.device)
+        self.dones = torch.zeros(capacity, 1, dtype=torch.bool, device=self.device)
     
     def push(self, state: np.ndarray, action: np.ndarray, reward: float, 
              next_state: np.ndarray, done: bool):
@@ -82,9 +76,12 @@ class SACAgent:
                  num_assets: int,
                  state_dim: int,
                  action_dim: int,
-                 device: torch.device = device,
+                 device: torch.device = None,
                  target_entropy: Optional[float] = None):
         
+        if device is None:
+            device = Config.init_device()
+            
         self.num_assets = num_assets
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -119,7 +116,7 @@ class SACAgent:
             capacity=Config.REPLAY_BUFFER_SIZE,
             state_dim=state_dim,
             action_dim=action_dim,
-            device=device
+            device=self.device
         )
         
         # Compteurs et statistiques
@@ -349,8 +346,7 @@ def test_agent():
     agent = SACAgent(
         num_assets=num_assets,
         state_dim=state_dim,
-        action_dim=action_dim,
-        device=device
+        action_dim=action_dim
     )
     
     # Simuler quelques transitions
@@ -390,7 +386,7 @@ def test_agent():
     agent.save(save_path)
     
     # Créer un nouvel agent et charger
-    new_agent = SACAgent(num_assets, state_dim, action_dim, device=device)
+    new_agent = SACAgent(num_assets, state_dim, action_dim)
     new_agent.load(save_path)
     
     # Vérifier que les actions sont similaires

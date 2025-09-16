@@ -198,16 +198,9 @@ class PortfolioTrainer:
         state_dim = self.train_env.observation_space.shape[0]
         action_dim = self.train_env.action_space.shape[0]
 
-        # Sélection du device
-        if torch.backends.mps.is_available():
-            device = torch.device("mps")
-            print("⚡ Utilisation du device: MPS (Metal Performance Shaders)")
-        elif torch.cuda.is_available():
-            device = torch.device("cuda")
-            print("⚡ Utilisation du device: CUDA (GPU Nvidia)")
-        else:
-            device = torch.device("cpu")
-            print("⚠️ Utilisation du device: CPU (pas de GPU disponible)")
+        # Utiliser le device centralisé
+        device = Config.init_device()
+        print(f"⚡ Utilisation du device: {device}")
 
         # Création de l'agent
         self.agent = SACAgent(

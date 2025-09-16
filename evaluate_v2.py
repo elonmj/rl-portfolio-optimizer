@@ -302,12 +302,17 @@ class PerformanceAnalyzer:
 
 def load_trained_agent(model_path: str) -> SACAgent:
     """Charge un agent SAC entraîné en lisant d'abord sa configuration."""
-    device = torch.device('mps') if torch.backends.mps.is_available() else torch.device('cpu')
+    device = Config.init_device()
 
     if not Path(model_path).exists():
         logger.warning(f"Fichier modèle non trouvé: {model_path}. Utilisation d'un modèle non entraîné par défaut.")
         # Créer un agent par défaut si aucun modèle n'est trouvé
-        return SACAgent(num_assets=10, state_dim=231, action_dim=10, device=device)
+        return SACAgent(
+            num_assets=Config.DEFAULT_AGENT_NUM_ASSETS, 
+            state_dim=Config.DEFAULT_AGENT_STATE_DIM, 
+            action_dim=Config.DEFAULT_AGENT_ACTION_DIM, 
+            device=device
+        )
 
     # 1. Charger le checkpoint pour lire la configuration
     checkpoint = torch.load(model_path, map_location=device)

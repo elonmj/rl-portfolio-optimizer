@@ -81,18 +81,33 @@ class Config:
     LOG_DIR = "logs/"
     MODEL_DIR = "models/"
     RESULTS_DIR = "results/"
-    import torch
-
     
-
+    # Dimensions par défaut pour l'agent
+    DEFAULT_AGENT_NUM_ASSETS = 10
+    DEFAULT_AGENT_STATE_DIM = 231
+    DEFAULT_AGENT_ACTION_DIM = 10
     
     # Paramètres de performance - GPU par défaut avec fallback CPU
-    DEVICE = (
-        torch.device("mps") if torch.backends.mps.is_available()
-        else torch.device("cpu")
-    )
-    print(f"Device utilisé : {DEVICE}")
+    @classmethod
+    def get_device(cls):
+        """Détection intelligente du device optimal (MPS > CUDA > CPU)"""
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        elif torch.cuda.is_available():
+            return torch.device("cuda")
+        else:
+            return torch.device("cpu")
+    
+    # Initialiser le device au chargement de la classe
+    DEVICE = None  # Sera initialisé lors du premier appel à get_device()
     NUM_WORKERS = 4
+    
+    @classmethod 
+    def init_device(cls):
+        """Initialise le device si pas encore fait"""
+        if cls.DEVICE is None:
+            cls.DEVICE = cls.get_device()
+        return cls.DEVICE
     
     @classmethod
     def get_data_split_dates(cls):
@@ -114,6 +129,9 @@ class Config:
 
 if __name__ == "__main__":
     Config.validate_config()
+    # Initialiser le device
+    device = Config.init_device()
+    print(f"Device détecté: {device}")
     print("Configuration chargée:")
     print(f"- Période d'entraînement: {Config.TRAIN_START} à {Config.TRAIN_END}")
     print(f"- Période de validation: {Config.VALIDATION_START} à {Config.VALIDATION_END}")

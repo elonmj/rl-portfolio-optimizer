@@ -15,6 +15,7 @@ import logging
 import os
 import torch
 
+from config import Config
 from train import PortfolioTrainer
 from evaluate_v2 import evaluate_model
 
@@ -25,22 +26,18 @@ warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
-# Détection du device (MPS > CUDA > CPU)
-if torch.backends.mps.is_available():
-    DEVICE = "mps"
-elif torch.cuda.is_available():
-    DEVICE = "cuda"
-else:
-    DEVICE = "cpu"
-
 def run_complete_demo():
     """Exécute une démonstration complète du système."""
+    
+    # Initialiser le device depuis la config
+    device = Config.init_device()
+    print(f"🔧 Device utilisé: {device}")
     
     print("🚀" + "="*60 + "🚀")
     print("     SAC PORTFOLIO OPTIMIZER - DÉMONSTRATION COMPLÈTE")
     print("🚀" + "="*60 + "🚀")
     print()
-    print(f"⚙️  Device utilisé : {DEVICE}")
+    print(f"⚙️  Device utilisé : {device}")
     print()
     
     # ========================================
@@ -50,7 +47,7 @@ def run_complete_demo():
     print("-" * 50)
     
     config_overrides = {
-        "DEVICE": DEVICE,              # <-- correction pour forcer le bon device
+        "DEVICE": device,              # <-- correction pour forcer le bon device
         "EVAL_FREQUENCY": 5,
         "SAVE_FREQUENCY": 20,
         "BATCH_SIZE": 128,
@@ -88,7 +85,7 @@ def run_complete_demo():
         print("🔍 Évaluation sur les périodes validation et test...")
         
         # Vérifier que le modèle existe
-        eval_model_path == "models/final_model.pth"
+        eval_model_path = "models/final_model.pth"
         
         results = evaluate_model(model_path=eval_model_path)
         
