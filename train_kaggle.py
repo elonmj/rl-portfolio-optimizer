@@ -88,7 +88,7 @@ class DataHandler:
         """Charge les données depuis le fichier Excel."""
         try:
             self.data = pd.read_excel(self.data_path, index_col=0, parse_dates=True)
-            print(f"✅ Data loaded: {self.data.shape}")
+            print(f"  Data loaded: {self.data.shape}")
             return self.data
         except Exception as e:
             print(f"❌ Error loading data: {e}")
@@ -116,7 +116,7 @@ class DataHandler:
         data = pd.DataFrame(prices, index=dates, columns=columns)
         
         self.data = data
-        print(f"✅ Synthetic data generated: {data.shape}")
+        print(f"  Synthetic data generated: {data.shape}")
         return data
     
     def calculate_returns(self) -> pd.DataFrame:
@@ -537,7 +537,7 @@ class SACAgent:
 
 def main():
     """Fonction principale d'entraînement."""
-    print("🎯 Starting RL Portfolio Optimizer Training on Kaggle")
+    print("  Starting RL Portfolio Optimizer Training on Kaggle")
     
     # Configuration
     device = Config.get_device()
@@ -615,7 +615,7 @@ def main():
         os.makedirs('models', exist_ok=True)
         model_path = 'models/sac_portfolio_agent_kaggle.pth'
         agent.save(model_path)
-        print(f"💾 Model saved to {model_path}")
+        print(f"  Model saved to {model_path}")
     except Exception as e:
         print(f"⚠️ Could not save model: {e}")
     
@@ -637,7 +637,7 @@ def main():
     except Exception as e:
         print(f"⚠️ Could not save summary: {e}")
     
-    print("✅ Kaggle training script completed successfully!")
+    print("  Kaggle training script completed successfully!")
 
 if __name__ == "__main__":
     main()

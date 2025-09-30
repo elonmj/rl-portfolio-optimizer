@@ -62,12 +62,12 @@ def run_complete_demo():
         
         metrics = trainer.train(num_episodes=5)
         
-        print("✅ Entraînement terminé avec succès!")
+        print("  Entraînement terminé avec succès!")
         if metrics and "total_return" in metrics and metrics["total_return"]:
             final_return = metrics["total_return"][-1]
             print(f"📊 Retour final d'entraînement: {final_return:.2%}")
         
-        print(f"💾 Modèle sauvegardé dans: {model_path}")
+        print(f"  Modèle sauvegardé dans: {model_path}")
         
     except Exception as e:
         print(f"❌ Erreur lors de l'entraînement: {e}")
@@ -90,7 +90,7 @@ def run_complete_demo():
         results = evaluate_model(model_path=eval_model_path)
         
         if results:
-            print("✅ Évaluation terminée avec succès!")
+            print("  Évaluation terminée avec succès!")
             print()
             print("📈 RÉSULTATS OBTENUS:")
             print("=" * 30)
@@ -98,7 +98,7 @@ def run_complete_demo():
             for period, metrics in results.items():
                 if "Agent" in period:
                     period_name = period.replace("Agent_", "")
-                    print(f"\n🎯 Période {period_name}:")
+                    print(f"\n  Période {period_name}:")
                     print(f"   • Rendement total: {metrics.get('total_return', 0):.2%}")
                     print(f"   • Rendement annualisé: {metrics.get('annualized_return', 0):.2%}")
                     print(f"   • Ratio de Sharpe: {metrics.get('sharpe_ratio', 0):.3f}")

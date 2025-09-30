@@ -617,7 +617,7 @@ if __name__ == "__main__":
         )
         
         if results:
-            logger.info("✅ Évaluation terminée avec succès")
+            logger.info("  Évaluation terminée avec succès")
             
             # Display summary
             print("\n" + "="*50)

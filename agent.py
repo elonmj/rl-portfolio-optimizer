@@ -126,7 +126,7 @@ class SACAgent:
         self.alpha_losses = deque(maxlen=1000)
         self.q_values = deque(maxlen=1000)
         
-        print(f"✅ Agent SAC initialisé:")
+        print(f"  Agent SAC initialisé:")
         print(f"   State dim: {state_dim}")
         print(f"   Action dim: {action_dim}")
         print(f"   Target entropy: {self.target_entropy:.2f}")
@@ -305,7 +305,7 @@ class SACAgent:
         }
         
         torch.save(save_dict, filepath)
-        print(f"✅ Agent sauvegardé dans {filepath}")
+        print(f"  Agent sauvegardé dans {filepath}")
     
     def load(self, filepath: str):
         """Charge l'agent complet"""
@@ -329,7 +329,7 @@ class SACAgent:
         self.training_step = checkpoint['training_step']
         self.target_entropy = checkpoint['target_entropy']
         
-        print(f"✅ Agent chargé depuis {filepath}")
+        print(f"  Agent chargé depuis {filepath}")
 
 
 def test_agent():
@@ -381,7 +381,7 @@ def test_agent():
         print(f"  {key}: {value:.4f}")
     
     # Test de sauvegarde/chargement
-    print("\n💾 Test sauvegarde/chargement...")
+    print("\n  Test sauvegarde/chargement...")
     save_path = "test_agent.pth"
     agent.save(save_path)
     
@@ -402,7 +402,7 @@ def test_agent():
     if os.path.exists(save_path):
         os.remove(save_path)
     
-    print("\n✅ Test de l'agent terminé avec succès!")
+    print("\n  Test de l'agent terminé avec succès!")
 
 
 if __name__ == "__main__":

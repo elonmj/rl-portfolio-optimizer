@@ -260,7 +260,7 @@ class Config:
             dir_path = Path(paths[dir_type])
             dir_path.mkdir(parents=True, exist_ok=True)
         
-        print(f"✅ Environment paths setup completed for {cls.get_execution_mode()} mode")
+        print(f"  Environment paths setup completed for {cls.get_execution_mode()} mode")
     
     @classmethod
     def log_environment_info(cls) -> None:
@@ -298,7 +298,7 @@ class Config:
         assert cls.CVAR_ALPHA > 0 and cls.CVAR_ALPHA < 1, "CVaR alpha doit être entre 0 et 1"
         assert cls.MAX_ASSETS >= max(cls.BUFFER_KEEP), "MAX_ASSETS doit être >= max(BUFFER_KEEP)"
         assert cls.MIN_HOLDING_WEEKS > 0, "MIN_HOLDING_WEEKS doit être positif"
-        print("✅ Configuration validée avec succès")
+        print("  Configuration validée avec succès")
 
 if __name__ == "__main__":
     Config.validate_config()

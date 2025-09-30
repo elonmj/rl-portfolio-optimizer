@@ -496,7 +496,7 @@ class SACModels:
         )
 
         
-        print(f"✅ Modèles SAC initialisés avec {num_assets} assets")
+        print(f"  Modèles SAC initialisés avec {num_assets} assets")
         print(f"   Mode: {'Attention' if self.use_attention else 'Simple (Accéléré)'}")
         print(f"   Actor parameters: {sum(p.numel() for p in self.actor.parameters()):,}")
         print(f"   Critic parameters: {sum(p.numel() for p in self.critic1.parameters()):,}")
@@ -530,7 +530,7 @@ class SACModels:
             'critic2_target': self.critic2_target.state_dict(),
             'log_alpha': self.log_alpha,
         }, path)
-        print(f"✅ Modèles sauvegardés dans {path}")
+        print(f"  Modèles sauvegardés dans {path}")
     
     def load_models(self, path: str):
         """Charge tous les modèles"""
@@ -543,7 +543,7 @@ class SACModels:
         self.critic2_target.load_state_dict(checkpoint['critic2_target'])
         self.log_alpha = checkpoint['log_alpha']
         
-        print(f"✅ Modèles chargés depuis {path}")
+        print(f"  Modèles chargés depuis {path}")
 
 
 def test_models():
@@ -582,7 +582,7 @@ def test_models():
     print(f"  Action sum: {sampled_action.sum(dim=1)}")  # Doit être ~1
     
     # Test Critics
-    print("\n🎯 Test Critics:")
+    print("\n  Test Critics:")
     q1 = models.critic1(state, action)
     q2 = models.critic2(state, action)
     print(f"  Q1 shape: {q1.shape}")
@@ -603,7 +603,7 @@ def test_models():
     param_changed = not torch.equal(old_param, new_param)
     print(f"  Parameters changed: {param_changed}")
     
-    print("\n✅ Test des modèles terminé avec succès!")
+    print("\n  Test des modèles terminé avec succès!")
 
 
 if __name__ == "__main__":

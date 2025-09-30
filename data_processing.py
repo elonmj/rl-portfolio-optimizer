@@ -34,7 +34,7 @@ class DataHandler:
         # Charger les données auxiliaires
         self._load_auxiliary_data()
         
-        print(f"✅ Données chargées: {len(self.available_tickers)} tickers disponibles")
+        print(f"  Données chargées: {len(self.available_tickers)} tickers disponibles")
         return {
             'prices': self.tickers_data,
             'dividends': self.dividends_data,
@@ -314,7 +314,7 @@ class FeatureProcessor:
         # Créer la matrice finale (T, K, 21) où T=temps, K=assets, 21=features
         features_matrix = np.stack(aligned_features, axis=1)  # Shape: (T, K, 21)
         
-        print(f"✅ Matrice de features créée: {features_matrix.shape} (temps, assets, features)")
+        print(f"  Matrice de features créée: {features_matrix.shape} (temps, assets, features)")
         
         return features_matrix, valid_tickers, pd.DatetimeIndex(common_dates)
 
@@ -358,9 +358,9 @@ def test_data_processing():
         if np.isnan(features_matrix).any():
             print("⚠️ Attention: des NaN détectés dans la matrice")
         else:
-            print("✅ Aucun NaN dans la matrice de features")
+            print("  Aucun NaN dans la matrice de features")
     
-    print("✅ Test terminé avec succès!")
+    print("  Test terminé avec succès!")
 
 
 if __name__ == "__main__":

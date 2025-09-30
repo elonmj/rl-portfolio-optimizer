@@ -120,7 +120,7 @@ class KaggleManagerGitHub:
             
         try:
             self.api.authenticate()
-            self.logger.info("✅ Authenticated with Kaggle API")
+            self.logger.info("  Authenticated with Kaggle API")
         except Exception as e:
             raise RuntimeError(f"Kaggle authentication failed: {e}")
 
@@ -174,7 +174,7 @@ class KaggleManagerGitHub:
                 if result.returncode == 0:
                     behind_count = int(result.stdout.strip()) if result.stdout.strip().isdigit() else 0
                     if behind_count == 0:
-                        self.logger.info("✅ Git repository is clean and up to date")
+                        self.logger.info("  Git repository is clean and up to date")
                         return True
             
             # There are changes - show them
@@ -200,19 +200,19 @@ class KaggleManagerGitHub:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             commit_message = f"Auto-commit before Kaggle workflow - {timestamp}\n\nUpdated for GitHub-based Kaggle execution"
             
-            self.logger.info("💾 Committing changes...")
+            self.logger.info("  Committing changes...")
             result = subprocess.run(['git', 'commit', '-m', commit_message], 
                                   capture_output=True, text=True, cwd=os.getcwd())
             
             if result.returncode != 0:
                 # Check if it's just "nothing to commit"
                 if "nothing to commit" in result.stdout.lower() or "working tree clean" in result.stdout.lower():
-                    self.logger.info("✅ No changes to commit - repository is clean")
+                    self.logger.info("  No changes to commit - repository is clean")
                 else:
                     self.logger.error(f"❌ Git commit failed: {result.stderr}")
                     return False
             else:
-                self.logger.info("✅ Changes committed successfully")
+                self.logger.info("  Changes committed successfully")
             
             # Push to remote
             return self._git_push(branch)
@@ -233,7 +233,7 @@ class KaggleManagerGitHub:
                                   capture_output=True, text=True, cwd=os.getcwd(), timeout=60)
             
             if result.returncode == 0:
-                self.logger.info("✅ Changes pushed successfully to GitHub")
+                self.logger.info("  Changes pushed successfully to GitHub")
                 return True
             else:
                 self.logger.error(f"❌ Git push failed: {result.stderr}")
@@ -288,7 +288,7 @@ class KaggleManagerGitHub:
         self.logger.info("🚀 Starting Complete GitHub-based Kaggle Workflow")
         self.logger.info(f"📂 Repository: {repo_url}")
         self.logger.info(f"🌿 Branch: {branch}")
-        self.logger.info(f"🎯 Episodes: {episodes}")
+        self.logger.info(f"  Episodes: {episodes}")
         
         # STEP 1: Ensure Git is up to date (CRITICAL)
         self.logger.info("🔄 Step 1: Ensuring Git repository is up to date...")
@@ -297,7 +297,7 @@ class KaggleManagerGitHub:
             self.logger.error("💡 Kaggle will clone outdated code if Git is not up to date!")
             return False, None
         
-        self.logger.info("✅ Git repository is up to date - proceeding with Kaggle workflow")
+        self.logger.info("  Git repository is up to date - proceeding with Kaggle workflow")
         
         # STEP 2: Create and upload GitHub-based kernel
         self.logger.info("📝 Step 2: Creating GitHub-based kernel...")
@@ -307,7 +307,7 @@ class KaggleManagerGitHub:
             self.logger.error("❌ Failed to create GitHub kernel")
             return False, None
             
-        self.logger.info(f"✅ GitHub kernel uploaded: {kernel_slug}")
+        self.logger.info(f"  GitHub kernel uploaded: {kernel_slug}")
         self.logger.info(f"🔗 URL: https://www.kaggle.com/code/{kernel_slug}")
         
         # STEP 3: Enhanced monitoring with session_summary.json detection
@@ -398,7 +398,7 @@ class KaggleManagerGitHub:
             self.api.kernels_push(str(script_dir))
             
             kernel_slug = f"{self.username}/{kernel_name}"
-            self.logger.info(f"✅ GitHub script uploaded: {kernel_slug}")
+            self.logger.info(f"  GitHub script uploaded: {kernel_slug}")
             
             return kernel_slug
                 
@@ -475,7 +475,7 @@ try:
     else:
         repo_https = REPO_URL
     
-    log_and_print("info", f"🎯 TRACKING_PROGRESS: Cloning from {{repo_https}}")
+    log_and_print("info", f"[PROGRESS] TRACKING_PROGRESS: Cloning from {{repo_https}}")
     
     # Clone with specific branch (public repo, no auth needed)
     clone_cmd = [
@@ -490,7 +490,7 @@ try:
     
     if result.returncode == 0:
         log_and_print("info", "[OK] Repository cloned successfully!")
-        log_and_print("info", f"🎯 TRACKING_SUCCESS: Repository cloned from {{BRANCH}} branch")
+        log_and_print("info", f"[SUCCESS] TRACKING_SUCCESS: Repository cloned from {{BRANCH}} branch")
         
         # List cloned contents
         if os.path.exists(REPO_DIR):
@@ -498,12 +498,12 @@ try:
             log_and_print("info", f"[INFO] Cloned files: {{len(files)}} items")
             for f in sorted(files)[:10]:  # First 10 items
                 log_and_print("info", f"  - {{f}}")
-        log_and_print("info", f"🎯 TRACKING_PROGRESS: File listing completed")
+        log_and_print("info", f"[PROGRESS] TRACKING_PROGRESS: File listing completed")
     else:
         log_and_print("error", f"[ERROR] Git clone failed:")
         log_and_print("error", f"STDOUT: {{result.stdout}}")
         log_and_print("error", f"STDERR: {{result.stderr}}")
-        log_and_print("error", f"🎯 TRACKING_ERROR: Git clone failed - {{result.stderr}}")
+        log_and_print("error", f"  TRACKING_ERROR: Git clone failed - {{result.stderr}}")
         sys.exit(1)
     
     # Change to repository directory
@@ -527,11 +527,11 @@ try:
     # Install requirements if present
     if os.path.exists("requirements.txt"):
         log_and_print("info", "\\n[INFO] Installing requirements...")
-        log_and_print("info", "🎯 TRACKING_PROGRESS: Starting requirements installation")
+        log_and_print("info", "[PROGRESS] TRACKING_PROGRESS: Starting requirements installation")
         subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], 
                       check=True, timeout=600)
         log_and_print("info", "[OK] Requirements installed")
-        log_and_print("info", "🎯 TRACKING_SUCCESS: Requirements installation completed")
+        log_and_print("info", "[SUCCESS] TRACKING_SUCCESS: Requirements installation completed")
     
     # Set environment variable for number of episodes (CRITICAL)
     os.environ['TRAINING_EPISODES'] = str({episodes})
@@ -539,7 +539,7 @@ try:
     
     # Import and run training
     log_and_print("info", "\\n[INFO] Starting training...")
-    log_and_print("info", "🎯 TRACKING_PROGRESS: Initializing training module")
+    log_and_print("info", "[PROGRESS] TRACKING_PROGRESS: Initializing training module")
     sys.path.insert(0, os.getcwd())
     
     # Import config and verify episodes configuration
@@ -550,17 +550,17 @@ try:
     
     # Import training script (use train_kaggle.py if available, otherwise train.py)
     if os.path.exists("train_kaggle.py"):
-        log_and_print("info", "🎯 TRACKING_PROGRESS: Using train_kaggle.py (Kaggle-optimized)")
+        log_and_print("info", "[PROGRESS] TRACKING_PROGRESS: Using train_kaggle.py (Kaggle-optimized)")
         import train_kaggle
         train_kaggle.main()
     else:
-        log_and_print("info", "🎯 TRACKING_PROGRESS: Using train.py")
+        log_and_print("info", "[PROGRESS] TRACKING_PROGRESS: Using train.py")
         # Use exec to avoid import issues with dependencies
-        log_and_print("info", "🎯 TRACKING_PROGRESS: Executing train.py content directly")
+        log_and_print("info", "[PROGRESS] TRACKING_PROGRESS: Executing train.py content directly")
         exec(open('train.py').read())
     
     log_and_print("info", "\\n[OK] Training completed successfully!")
-    log_and_print("info", "🎯 TRACKING_SUCCESS: Training execution finished successfully")
+    log_and_print("info", "[SUCCESS] TRACKING_SUCCESS: Training execution finished successfully")
     
 except subprocess.TimeoutExpired:
     log_and_print("error", "[ERROR] Git clone timeout - repository too large or network issues")
@@ -581,7 +581,7 @@ finally:
         if os.path.exists(REPO_DIR):
             log_and_print("info", f"[INFO] Cleaning up cloned repository: {{REPO_DIR}}")
             shutil.rmtree(REPO_DIR)
-            log_and_print("info", "✓ Cleanup completed - only results will remain in kernel output")
+            log_and_print("info", "[OK] Cleanup completed - only results will remain in kernel output")
     except Exception as e:
         log_and_print("warning", f"[WARN] Could not cleanup repository: {{e}}")
     
@@ -603,13 +603,13 @@ finally:
             json.dump(summary, f, indent=2)
         
         log_and_print("info", f"\\n[INFO] Results saved with session_summary.json")
-        log_and_print("info", "🎯 TRACKING_SUCCESS: Session summary created")
+        log_and_print("info", "[SUCCESS] TRACKING_SUCCESS: Session summary created")
     except Exception as e:
         log_and_print("warning", f"[WARN] Could not save results: {{e}}")
     
     # Final flush and close remote logging
     try:
-        log_and_print("info", "🎯 FINAL: Remote logging completed - log.txt ready for download")
+        log_and_print("info", "[FINAL] Remote logging completed - log.txt ready for download")
         log_handler.flush()
         log_handler.close()
     except Exception as e:
@@ -669,7 +669,7 @@ finally:
                         success = self._retrieve_and_analyze_logs(kernel_slug, success_keywords, error_keywords)
                         
                         if 'COMPLETE' in status_str and success:
-                            self.logger.info("✅ Workflow completed successfully!")
+                            self.logger.info("  Workflow completed successfully!")
                             return True
                         elif 'ERROR' in status_str:
                             self.logger.error(f"❌ Kernel failed with ERROR status - stopping monitoring")
@@ -730,7 +730,7 @@ finally:
                         with open(os.path.join(temp_dir, 'log.txt'), 'w', encoding='utf-8') as f:
                             f.write(f"[INFO] Kernel {kernel_slug} completed successfully\n")
                             f.write("[OK] Training completed successfully!\n")
-                            f.write("🎯 TRACKING_SUCCESS: Training execution finished successfully\n")
+                            f.write("[SUCCESS] TRACKING_SUCCESS: Training execution finished successfully\n")
                         
                         # Create results directory and session summary
                         results_dir = os.path.join(temp_dir, 'results')
@@ -747,7 +747,7 @@ finally:
                         with open(os.path.join(results_dir, 'session_summary.json'), 'w', encoding='utf-8') as f:
                             json.dump(summary, f, indent=2)
                         
-                        self.logger.info("✅ Created workaround files - continuing analysis")
+                        self.logger.info("  Created workaround files - continuing analysis")
                         
                     except Exception as e2:
                         self.logger.error(f"❌ Workaround creation failed: {e2}")
@@ -773,14 +773,14 @@ finally:
                         self.logger.warning(f"⚠️ Error copying {name}: {e}")
                         continue
                         
-                self.logger.info(f"💾 Persisted kernel artifacts to: {persist_dir}")
+                self.logger.info(f"  Persisted kernel artifacts to: {persist_dir}")
 
                 # PRIORITY 1: Look for remote log.txt (most reliable - our own FileHandler)
                 remote_log_found = False
                 remote_log_path = os.path.join(temp_dir, 'log.txt')
                 
                 if os.path.exists(remote_log_path):
-                    self.logger.info(f"🎯 Found remote log.txt at: {remote_log_path}")
+                    self.logger.info(f"  Found remote log.txt at: {remote_log_path}")
                     
                     try:
                         with open(remote_log_path, 'r', encoding='utf-8') as f:
@@ -788,14 +788,14 @@ finally:
                         
                         # Copy remote log to persist directory
                         shutil.copy2(remote_log_path, persist_dir / 'remote_log.txt')
-                        self.logger.info("💾 Remote log.txt saved to persist directory")
+                        self.logger.info("  Remote log.txt saved to persist directory")
                         
                         # Check for success in remote log
                         success_found = any(keyword in log_content for keyword in success_keywords)
                         error_found = any(keyword in log_content for keyword in error_keywords)
                         
                         if success_found:
-                            self.logger.info("✅ Success indicators found in remote log.txt")
+                            self.logger.info("  Success indicators found in remote log.txt")
                             remote_log_found = True
                         
                         if error_found:
@@ -813,7 +813,7 @@ finally:
                 for root, dirs, files in os.walk(temp_dir):
                     if 'session_summary.json' in files:
                         summary_path = os.path.join(root, 'session_summary.json')
-                        self.logger.info(f"🎯 Found session_summary.json at: {summary_path}")
+                        self.logger.info(f"  Found session_summary.json at: {summary_path}")
                         
                         try:
                             with open(summary_path, 'r', encoding='utf-8') as f:
@@ -826,7 +826,7 @@ finally:
                             shutil.copy2(summary_path, persist_dir / 'session_summary.json')
                             
                             if status == 'completed':
-                                self.logger.info("✅ session_summary.json indicates successful completion!")
+                                self.logger.info("  session_summary.json indicates successful completion!")
                                 session_summary_found = True
                                 break
                                 
@@ -850,7 +850,7 @@ finally:
                                 
                                 success_found = any(keyword in log_content for keyword in success_keywords)
                                 if success_found:
-                                    self.logger.info(f"✅ Success found in {os.path.basename(log_file)}")
+                                    self.logger.info(f"  Success found in {os.path.basename(log_file)}")
                                     stdout_log_found = True
                                     break
                                     
@@ -859,13 +859,13 @@ finally:
                 
                 # Final decision: remote log.txt has priority
                 if remote_log_found:
-                    self.logger.info("✅ Success confirmed via remote log.txt (FileHandler)")
+                    self.logger.info("  Success confirmed via remote log.txt (FileHandler)")
                     return True
                 elif session_summary_found:
-                    self.logger.info("✅ Success confirmed via session_summary.json")
+                    self.logger.info("  Success confirmed via session_summary.json")
                     return True
                 elif stdout_log_found:
-                    self.logger.info("✅ Success detected via fallback log analysis")
+                    self.logger.info("  Success detected via fallback log analysis")
                     return True
                 else:
                     self.logger.warning("⚠️ No clear success indicators found in any logs")
@@ -915,7 +915,7 @@ finally:
                                           encoding='utf-8', errors='ignore', timeout=300)
                     if result.returncode != 0:
                         raise Exception(f"Subprocess failed: {result.stderr}")
-                    self.logger.info("✅ Downloaded using subprocess alternative")
+                    self.logger.info("  Downloaded using subprocess alternative")
                 except Exception as e2:
                     self.logger.error(f"❌ Alternative download failed: {e2}")
                     raise e
@@ -923,7 +923,7 @@ finally:
             # Check if session_summary.json was downloaded (indicates cleanup worked)
             session_summary = output_path / "session_summary.json"
             if session_summary.exists():
-                self.logger.info("🎯 session_summary.json found - cleanup worked correctly!")
+                self.logger.info("  session_summary.json found - cleanup worked correctly!")
                 with open(session_summary, 'r', encoding='utf-8', errors='ignore') as f:
                     summary = json.load(f)
                     self.logger.info(f"📊 Session status: {summary.get('status', 'unknown')}")
@@ -992,7 +992,7 @@ def run_kaggle_training(episodes: int = 1,
             timeout=timeout
         )
         if success and kernel_slug:
-            print(f"✅ Kernel completed successfully: {kernel_slug}")
+            print(f"  Kernel completed successfully: {kernel_slug}")
         return success
     except Exception as e:
         print(f"Error running Kaggle training: {e}")
@@ -1007,6 +1007,6 @@ if __name__ == "__main__":
     success = run_kaggle_training(episodes=1)
     
     if success:
-        print("✅ Kaggle workflow completed successfully!")
+        print("  Kaggle workflow completed successfully!")
     else:
         print("❌ Kaggle workflow failed - check logs for details")

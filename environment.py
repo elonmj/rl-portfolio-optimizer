@@ -73,7 +73,7 @@ class PortfolioEnv(gym.Env):
         # Définir les espaces d'action et d'observation
         self._define_spaces()
         
-        print(f"✅ Environnement initialisé avec {len(self.valid_tickers)} assets sur {len(self.dates)} périodes")
+        print(f"  Environnement initialisé avec {len(self.valid_tickers)} assets sur {len(self.dates)} périodes")
     
     def _prepare_data(self):
         """Prépare les données pour l'environnement"""
@@ -517,7 +517,7 @@ def test_environment():
     
     # Test de reset
     obs, info = env.reset()
-    print(f"✅ Reset OK - Observation shape: {obs.shape}")
+    print(f"  Reset OK - Observation shape: {obs.shape}")
     print(f"   Info: {info}")
     
     # Test de quelques steps avec actions aléatoires
@@ -535,7 +535,7 @@ def test_environment():
         if terminated:
             break
     
-    print(f"✅ Test environnement terminé - Reward total: {total_reward:.4f}")
+    print(f"  Test environnement terminé - Reward total: {total_reward:.4f}")
     
     # Test du rendering
     env.render()

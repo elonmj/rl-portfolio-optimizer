@@ -15,7 +15,7 @@ print('🧪 Test d\'entraînement avec 5 épisodes...')
 
 try:
     metrics = trainer.train(num_episodes=5)
-    print('✅ Test d\'entraînement réussi!')
+    print('  Test d\'entraînement réussi!')
     if metrics['total_return']:
         final_return = metrics['total_return'][-1]
         print(f'Retour final: {final_return:.2%}')

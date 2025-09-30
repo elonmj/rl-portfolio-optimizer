@@ -1,6 +1,6 @@
 # 📈 SAC Portfolio Optimizer - Documentation Système
 
-## 🎯 Vue d'ensemble
+##   Vue d'ensemble
 
 Ce système implémente un optimiseur de portefeuille basé sur l'algorithme **Soft Actor-Critic (SAC)** avec mécanisme d'attention pour la gestion quantitative de portefeuilles financiers.
 
@@ -78,7 +78,7 @@ Après `python demo_complete.py`, vous obtiendrez :
 ├── 🌍 environment.py - Environnement de trading simulé  
 ├── 🧠 models.py - Réseaux de neurones avec attention
 ├── 🤖 agent.py - Agent SAC principal
-├── 🎯 train.py - Script d'entraînement
+├──   train.py - Script d'entraînement
 ├── 📈 evaluate_v2.py - Évaluation et backtesting
 ├── ⚙️ config.py - Configuration centralisée
 └── 🚀 demo_complete.py - Test complet
@@ -113,7 +113,7 @@ class Config:
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 ```
 
-## 🎯 Détails techniques
+##   Détails techniques
 
 ### Contraintes de trading (selon spec.md)
 
@@ -152,10 +152,10 @@ action_dim = 10                          # Nouveau portefeuille
 
 | Environnement | GPU | CPU | Replay Buffer | Performance |
 |---------------|-----|-----|---------------|-------------|
-| Local GPU     | ✅   | ✅   | ✅             | Optimal     |
-| Local CPU     | ❌   | ✅   | ❌             | Dégradé     |
-| Kaggle        | ✅   | ✅   | ✅             | Optimal     |
-| Colab         | ✅   | ✅   | ✅             | Optimal     |
+| Local GPU     |     |     |               | Optimal     |
+| Local CPU     | ❌   |     | ❌             | Dégradé     |
+| Kaggle        |     |     |               | Optimal     |
+| Colab         |     |     |               | Optimal     |
 
 ---
 

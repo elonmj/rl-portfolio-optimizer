@@ -36,7 +36,7 @@ if '/kaggle' in os.getcwd():
 
 try:
     from config import Config
-    print("✅ Successfully imported Config")
+    print("  Successfully imported Config")
 except ImportError as e:
     print(f"❌ Failed to import Config: {e}")
     # Fallback for debugging
@@ -374,7 +374,7 @@ class PortfolioTrainer:
         with open(results_file, 'w') as f:
             json.dump(kaggle_results, f, indent=2, default=str)
             
-        print(f"💾 Kaggle results saved to: {results_file}")
+        print(f"  Kaggle results saved to: {results_file}")
         
         # Also save metrics in standard CSV format for easy analysis
         metrics_file = os.path.join(results_dir, 'training_metrics_kaggle.csv')
@@ -576,11 +576,11 @@ class PortfolioTrainer:
                 self.logger.plot_training_curves()
                 
                 if self.kaggle_mode:
-                    print(f"💾 Checkpoint saved: episode {episode}")
+                    print(f"  Checkpoint saved: episode {episode}")
         
         # Fin de l'entraînement
         total_time = time.time() - start_time
-        print(f"\n✅ Entraînement terminé en {total_time/60:.1f} minutes")
+        print(f"\n  Entraînement terminé en {total_time/60:.1f} minutes")
         print(f"   Meilleur retour validation: {self.best_val_return:.2%}")
         
         # Sauvegarde finale avec path adapté
@@ -614,7 +614,7 @@ def main(num_episodes: Optional[int] = None, kaggle_mode: bool = False, github_m
         kaggle_mode: Active le workflow Kaggle API (upload/monitoring/download)
         github_mode: Active le mode GitHub pour tests
     """
-    print("🎯 Démarrage de l'entraînement de l'agent SAC pour la gestion de portefeuille")
+    print("  Démarrage de l'entraînement de l'agent SAC pour la gestion de portefeuille")
     
     # Real execution environment detection (where the code actually runs)
     execution_environment = Config.get_execution_mode()  # 'local' or 'kaggle'
