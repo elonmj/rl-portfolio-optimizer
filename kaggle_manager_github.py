@@ -599,7 +599,7 @@ finally:
             "kaggle_session": True
         }}
         
-        with open(os.path.join(results_dir, "session_summary.json"), "w") as f:
+        with open(os.path.join(results_dir, "session_summary.json"), "w", encoding='utf-8') as f:
             json.dump(summary, f, indent=2)
         
         log_and_print("info", f"\\n[INFO] Results saved with session_summary.json")
@@ -716,19 +716,42 @@ finally:
             # Download artifacts to temp dir
             with tempfile.TemporaryDirectory() as temp_dir:
                 self.logger.info(f"📥 Downloading kernel output for: {kernel_slug}")
-                self.api.kernels_output(kernel_slug, path=temp_dir, quiet=True)
+                
+                # Try to download with encoding protection
+                try:
+                    self.api.kernels_output(kernel_slug, path=temp_dir, quiet=True)
+                except UnicodeError as e:
+                    self.logger.warning(f"⚠️ Unicode encoding issue during download: {e}")
+                    # Try alternative approach - use subprocess with explicit encoding
+                    try:
+                        import subprocess
+                        cmd = ['kaggle', 'kernels', 'output', kernel_slug, '-p', temp_dir]
+                        result = subprocess.run(cmd, capture_output=True, text=True, 
+                                              encoding='utf-8', errors='ignore', timeout=300)
+                        if result.returncode != 0:
+                            raise Exception(f"Subprocess failed: {result.stderr}")
+                    except Exception as e2:
+                        self.logger.error(f"❌ Alternative download method failed: {e2}")
+                        raise e  # Re-raise original error
 
                 # Persist artifacts (for debugging and future reference)
                 persist_dir = Path('test_output') / 'results' / kernel_slug.replace('/', '_')
                 persist_dir.mkdir(parents=True, exist_ok=True)
                 
                 for name in os.listdir(temp_dir):
-                    src_path = os.path.join(temp_dir, name)
-                    dst_path = persist_dir / name
-                    if os.path.isfile(src_path):
-                        shutil.copy2(src_path, dst_path)
-                    elif os.path.isdir(src_path):
-                        shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+                    try:
+                        src_path = os.path.join(temp_dir, name)
+                        dst_path = persist_dir / name
+                        if os.path.isfile(src_path):
+                            shutil.copy2(src_path, dst_path)
+                        elif os.path.isdir(src_path):
+                            shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+                    except UnicodeError as e:
+                        self.logger.warning(f"⚠️ Unicode error copying {name}: {e}")
+                        continue
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ Error copying {name}: {e}")
+                        continue
                         
                 self.logger.info(f"💾 Persisted kernel artifacts to: {persist_dir}")
 
@@ -858,15 +881,30 @@ finally:
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
             
-            # Download using kaggle API
+            # Download using kaggle API with encoding protection
             self.logger.info(f"📦 Downloading to: {output_path.absolute()}")
-            self.api.kernels_output(kernel_slug, path=str(output_path), force=True, quiet=False)
+            try:
+                self.api.kernels_output(kernel_slug, path=str(output_path), force=True, quiet=False)
+            except UnicodeError as e:
+                self.logger.warning(f"⚠️ Unicode encoding issue: {e}")
+                # Try subprocess alternative
+                try:
+                    import subprocess
+                    cmd = ['kaggle', 'kernels', 'output', kernel_slug, '-p', str(output_path), '--force']
+                    result = subprocess.run(cmd, capture_output=True, text=True, 
+                                          encoding='utf-8', errors='ignore', timeout=300)
+                    if result.returncode != 0:
+                        raise Exception(f"Subprocess failed: {result.stderr}")
+                    self.logger.info("✅ Downloaded using subprocess alternative")
+                except Exception as e2:
+                    self.logger.error(f"❌ Alternative download failed: {e2}")
+                    raise e
             
             # Check if session_summary.json was downloaded (indicates cleanup worked)
             session_summary = output_path / "session_summary.json"
             if session_summary.exists():
                 self.logger.info("🎯 session_summary.json found - cleanup worked correctly!")
-                with open(session_summary, 'r') as f:
+                with open(session_summary, 'r', encoding='utf-8', errors='ignore') as f:
                     summary = json.load(f)
                     self.logger.info(f"📊 Session status: {summary.get('status', 'unknown')}")
             else:
