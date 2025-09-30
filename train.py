@@ -495,13 +495,24 @@ class PortfolioTrainer:
     
     def train(self, num_episodes: int = None):
         """Boucle principale d'entraînement avec support Kaggle"""
-        # Use environment-specific episode count
+        # PRIORITY: Explicit parameter > Environment config > Default config
         if num_episodes is None:
+            # No explicit parameter - use environment-specific configuration
             num_episodes = self.training_config.get('max_episodes', Config.MAX_EPISODES)
+        else:
+            # Explicit parameter provided - use it (highest priority)
+            print(f"� Using explicit num_episodes parameter: {num_episodes} (overriding config)")
             
-        print(f"🏋️ Démarrage de l'entraînement pour {num_episodes} épisodes")
+        print(f"�🏋️ Démarrage de l'entraînement pour {num_episodes} épisodes")
         print(f"🌍 Environnement: {self.execution_mode}")
         print(f"🚀 Workflow Kaggle: {'Oui' if self.kaggle_mode else 'Non'}")
+        
+        # Debug: Show configuration source for transparency
+        env_episodes = self.training_config.get('max_episodes', Config.MAX_EPISODES)
+        if num_episodes != env_episodes:
+            print(f"📝 Note: Environment config suggests {env_episodes} episodes, but using explicit {num_episodes}")
+        else:
+            print(f"📝 Note: Using environment config: {num_episodes} episodes")
         
         # Configuration
         self.setup_environments()

@@ -224,6 +224,128 @@ class ActorWithAttention(nn.Module):
         return action, log_prob, torch.tanh(mean)
 
 
+class ActorSimple(nn.Module):
+    """
+    Réseau Actor SIMPLIFIÉ sans mécanisme d'attention pour accélérer les calculs.
+    Produit une distribution de probabilité sur les allocations de portefeuille.
+    """
+    
+    def __init__(self, 
+                 num_assets: int,
+                 feature_dim: int = Config.FEATURE_DIM,
+                 hidden_dim: int = Config.HIDDEN_DIM):
+        super().__init__()
+        
+        self.num_assets = num_assets
+        self.feature_dim = feature_dim
+        self.hidden_dim = hidden_dim
+        
+        # Dimensions d'entrée
+        asset_features_dim = num_assets * feature_dim
+        portfolio_state_dim = num_assets + 1 + num_assets  # weights + cash + holdings
+        total_input_dim = asset_features_dim + portfolio_state_dim
+        
+        # Réseau simple sans attention
+        self.policy_net = nn.Sequential(
+            nn.Linear(total_input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, num_assets * 2)  # Mean et log_std pour chaque asset
+        )
+        
+        # Limites pour log_std
+        self.log_std_min = -20
+        self.log_std_max = 2
+        
+    def forward(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass simplifié de l'actor."""
+        # Passer directement l'état complet dans le réseau
+        policy_output = self.policy_net(state)
+        
+        # Séparer mean et log_std
+        mean = policy_output[:, :self.num_assets]
+        log_std = policy_output[:, self.num_assets:]
+        
+        # Contraindre log_std
+        log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
+        
+        return mean, log_std
+    
+    def sample(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Échantillonne une action à partir de la politique."""
+        mean, log_std = self.forward(state)
+        std = log_std.exp()
+        
+        # Distribution normale
+        normal = torch.distributions.Normal(mean, std)
+        x_t = normal.rsample()  # Reparameterization trick
+        
+        # Appliquer tanh pour contraindre à [-1, 1]
+        action_raw = torch.tanh(x_t)
+        
+        # Calculer log_prob avec correction de Jacobien
+        log_prob = normal.log_prob(x_t)
+        log_prob -= torch.log(1 - action_raw.pow(2) + 1e-7)
+        log_prob = log_prob.sum(dim=1, keepdim=True)
+        
+        # Transformer vers [0, 1] et normaliser
+        action = (action_raw + 1) / 2  # [-1, 1] -> [0, 1]
+        action = F.softmax(action * 5, dim=1)  # Softmax avec température
+        
+        return action, log_prob, torch.tanh(mean)
+
+
+class CriticSimple(nn.Module):
+    """
+    Réseau Critic SIMPLIFIÉ sans mécanisme d'attention pour accélérer les calculs.
+    Évalue la valeur état-action.
+    """
+    
+    def __init__(self, 
+                 num_assets: int,
+                 feature_dim: int = Config.FEATURE_DIM,
+                 hidden_dim: int = Config.HIDDEN_DIM):
+        super().__init__()
+        
+        self.num_assets = num_assets
+        self.feature_dim = feature_dim
+        self.hidden_dim = hidden_dim
+        
+        # Dimensions d'entrée
+        asset_features_dim = num_assets * feature_dim
+        portfolio_state_dim = num_assets + 1 + num_assets  # weights + cash + holdings
+        action_dim = num_assets
+        total_input_dim = asset_features_dim + portfolio_state_dim + action_dim
+        
+        # Réseau Q-value simplifié
+        self.q_net = nn.Sequential(
+            nn.Linear(total_input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+        
+    def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        """Forward pass simplifié du critic."""
+        # Concaténer état et action
+        combined = torch.cat([state, action], dim=1)
+        
+        # Calculer la Q-value
+        q_value = self.q_net(combined)
+        
+        return q_value
+
+
 class CriticWithAttention(nn.Module):
     """
     Réseau Critic avec mécanisme d'attention pour les Q-values SAC.
@@ -326,22 +448,34 @@ class CriticWithAttention(nn.Module):
 from config import Config
 
 class SACModels:
-    """Conteneur pour tous les modèles SAC"""
+    """Conteneur pour tous les modèles SAC avec option attention/simple"""
     
     def __init__(self, num_assets: int, device: torch.device = None):
         if device is None:
             device = Config.init_device()
         self.num_assets = num_assets
         self.device = device
+        self.use_attention = Config.USE_ATTENTION
         
-        # Créer les modèles
-        self.actor = ActorWithAttention(num_assets).to(device)
-        self.critic1 = CriticWithAttention(num_assets).to(device)
-        self.critic2 = CriticWithAttention(num_assets).to(device)
-        
-        # Créer les targets (copies des critics)
-        self.critic1_target = CriticWithAttention(num_assets).to(device)
-        self.critic2_target = CriticWithAttention(num_assets).to(device)
+        # Créer les modèles selon l'option attention
+        if self.use_attention:
+            print("🧠 Utilisation des modèles AVEC mécanisme d'attention")
+            self.actor = ActorWithAttention(num_assets).to(device)
+            self.critic1 = CriticWithAttention(num_assets).to(device)
+            self.critic2 = CriticWithAttention(num_assets).to(device)
+            
+            # Créer les targets (copies des critics)
+            self.critic1_target = CriticWithAttention(num_assets).to(device)
+            self.critic2_target = CriticWithAttention(num_assets).to(device)
+        else:
+            print("⚡ Utilisation des modèles SIMPLES (sans attention) - ACCÉLÉRATION")
+            self.actor = ActorSimple(num_assets).to(device)
+            self.critic1 = CriticSimple(num_assets).to(device)
+            self.critic2 = CriticSimple(num_assets).to(device)
+            
+            # Créer les targets (copies des critics)
+            self.critic1_target = CriticSimple(num_assets).to(device)
+            self.critic2_target = CriticSimple(num_assets).to(device)
         
         # Initialiser les targets avec les mêmes poids
         self.critic1_target.load_state_dict(self.critic1.state_dict())
@@ -363,8 +497,13 @@ class SACModels:
 
         
         print(f"✅ Modèles SAC initialisés avec {num_assets} assets")
+        print(f"   Mode: {'Attention' if self.use_attention else 'Simple (Accéléré)'}")
         print(f"   Actor parameters: {sum(p.numel() for p in self.actor.parameters()):,}")
         print(f"   Critic parameters: {sum(p.numel() for p in self.critic1.parameters()):,}")
+        
+        # Afficher la réduction de paramètres en mode simple
+        if not self.use_attention:
+            print(f"   ⚡ Mode accéléré activé - Calculs simplifiés sans attention")
     
     @property
     def alpha(self):

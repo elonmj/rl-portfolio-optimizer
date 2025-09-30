@@ -62,6 +62,7 @@ class Config:
     # Architecture du réseau de neurones
     FEATURE_DIM = len(TECHNICAL_INDICATORS)  # 21 features par asset
     HIDDEN_DIM = 256
+    USE_ATTENTION = False  # Temporairement activé pour comparaison
     ATTENTION_HEADS = 8
     ATTENTION_DIM = 64
     
