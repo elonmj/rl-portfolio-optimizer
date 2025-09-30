@@ -661,19 +661,20 @@ finally:
                     self.logger.info(f"⏱️ Status: {current_status} (after {elapsed:.1f}s)")
                     
                     # Check if execution is complete - STOP IMMEDIATELY on final status
-                    if current_status.upper() in ['COMPLETE', 'ERROR', 'CANCELLED']:
+                    status_str = str(current_status).upper()
+                    if any(final_status in status_str for final_status in ['COMPLETE', 'ERROR', 'CANCELLED']):
                         self.logger.info(f"🏁 Kernel execution finished with status: {current_status}")
                         
                         # Analyze logs immediately (KEY DETECTION)
                         success = self._retrieve_and_analyze_logs(kernel_slug, success_keywords, error_keywords)
                         
-                        if current_status.upper() == 'COMPLETE' and success:
+                        if 'COMPLETE' in status_str and success:
                             self.logger.info("✅ Workflow completed successfully!")
                             return True
-                        elif current_status.upper() == 'ERROR':
+                        elif 'ERROR' in status_str:
                             self.logger.error(f"❌ Kernel failed with ERROR status - stopping monitoring")
                             return False
-                        elif current_status.upper() == 'CANCELLED':
+                        elif 'CANCELLED' in status_str:
                             self.logger.error(f"❌ Kernel was cancelled - stopping monitoring")
                             return False
                         else:
