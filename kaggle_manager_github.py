@@ -548,15 +548,14 @@ try:
     actual_episodes = training_config.get('max_episodes', 1)
     log_and_print("info", f"[INFO] Configuration loaded - Episodes to run: {{actual_episodes}}")
     
-    # Import training script
-    import train
-    log_and_print("info", "🎯 TRACKING_PROGRESS: Train module imported successfully")
-    
-    # Run training with explicit episodes parameter
-    if hasattr(train, 'main'):
-        log_and_print("info", f"🎯 TRACKING_PROGRESS: Executing train.main(num_episodes={episodes})")
-        train.main(num_episodes={episodes})
+    # Import training script (use train_kaggle.py if available, otherwise train.py)
+    if os.path.exists("train_kaggle.py"):
+        log_and_print("info", "🎯 TRACKING_PROGRESS: Using train_kaggle.py (Kaggle-optimized)")
+        import train_kaggle
+        train_kaggle.main()
     else:
+        log_and_print("info", "🎯 TRACKING_PROGRESS: Using train.py")
+        # Use exec to avoid import issues with dependencies
         log_and_print("info", "🎯 TRACKING_PROGRESS: Executing train.py content directly")
         exec(open('train.py').read())
     
@@ -665,12 +664,18 @@ finally:
                     if current_status in ['complete', 'error', 'cancelled']:
                         self.logger.info(f"🏁 Kernel execution finished with status: {current_status}")
                         
-                        # Analyze logs for session_summary.json (KEY DETECTION)
+                        # Analyze logs immediately (KEY DETECTION)
                         success = self._retrieve_and_analyze_logs(kernel_slug, success_keywords, error_keywords)
                         
-                        if success:
+                        if current_status == 'complete' and success:
                             self.logger.info("✅ Workflow completed successfully!")
                             return True
+                        elif current_status == 'error':
+                            self.logger.error(f"❌ Kernel failed with ERROR status - check logs for details")
+                            return False
+                        elif current_status == 'cancelled':
+                            self.logger.error(f"❌ Kernel was cancelled - check logs for details")
+                            return False
                         else:
                             self.logger.error("❌ Workflow failed - check logs for details")
                             return False
