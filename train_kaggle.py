@@ -223,8 +223,8 @@ class PortfolioEnv:
         weight_changes = np.abs(action - self.portfolio_weights)
         transaction_costs = np.sum(weight_changes) * self.transaction_cost * self.portfolio_value
         
-        # Update portfolio
-        if self.current_step < len(self.data):
+        # Update portfolio - use returns length, not data length
+        if self.current_step < len(self.returns):
             current_returns = self.returns.iloc[self.current_step]
             
             # Portfolio return
@@ -239,11 +239,12 @@ class PortfolioEnv:
             reward = portfolio_return - (transaction_costs / self.portfolio_value)
         else:
             reward = 0
+            portfolio_return = 0
         
         self.current_step += 1
         
-        # Check if episode is done
-        done = self.current_step >= len(self.data) - 1
+        # Check if episode is done - use returns length
+        done = self.current_step >= len(self.returns) - 1
         truncated = False
         
         info = {
