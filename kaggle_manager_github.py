@@ -79,19 +79,36 @@ class KaggleManagerGitHub:
         self.kernel_base_name = "rl-portfolio-optimizer"
         
     def _setup_logging(self) -> logging.Logger:
-        """Setup dedicated logging."""
+        """Setup dedicated logging with both console and file handlers."""
         logger = logging.getLogger('kaggle_manager_github')
         logger.setLevel(logging.INFO)
         
         if not logger.handlers:
-            handler = logging.StreamHandler()
+            # Console handler (original behavior)
+            console_handler = logging.StreamHandler()
             formatter = logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
             )
-            handler.setFormatter(formatter)
-            logger.addHandler(handler)
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+            
+            # File handler with immediate flush for real-time logging
+            log_file = Path.cwd() / "log.txt"
+            file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            
+            # Store file handler reference for forced flush
+            self._file_handler = file_handler
             
         return logger
+        
+    def _log_with_flush(self, level: str, message: str) -> None:
+        """Log message with immediate flush to file."""
+        getattr(self.logger, level.lower())(message)
+        # Force immediate flush to file
+        if hasattr(self, '_file_handler'):
+            self._file_handler.flush()
         
     def _validate_and_authenticate(self) -> None:
         """Validate environment and authenticate."""
@@ -250,7 +267,7 @@ class KaggleManagerGitHub:
                                      repo_url: str = "https://github.com/elonmj/rl-portfolio-optimizer.git", 
                                      branch: str = "feature/training-config-updates", 
                                      episodes: int = 1,
-                                     timeout: int = 3600) -> bool:
+                                     timeout: int = 3600) -> tuple[bool, Optional[str]]:
         """
         MAIN WORKFLOW: Complete GitHub-based Kaggle workflow.
         
@@ -266,7 +283,7 @@ class KaggleManagerGitHub:
             timeout: Maximum monitoring time
             
         Returns:
-            bool: True if workflow completed successfully
+            tuple[bool, Optional[str]]: (success, kernel_slug)
         """
         self.logger.info("🚀 Starting Complete GitHub-based Kaggle Workflow")
         self.logger.info(f"📂 Repository: {repo_url}")
@@ -278,7 +295,7 @@ class KaggleManagerGitHub:
         if not self.ensure_git_up_to_date(branch):
             self.logger.error("❌ Failed to update Git repository - aborting workflow")
             self.logger.error("💡 Kaggle will clone outdated code if Git is not up to date!")
-            return False
+            return False, None
         
         self.logger.info("✅ Git repository is up to date - proceeding with Kaggle workflow")
         
@@ -288,7 +305,7 @@ class KaggleManagerGitHub:
         
         if not kernel_slug:
             self.logger.error("❌ Failed to create GitHub kernel")
-            return False
+            return False, None
             
         self.logger.info(f"✅ GitHub kernel uploaded: {kernel_slug}")
         self.logger.info(f"🔗 URL: https://www.kaggle.com/code/{kernel_slug}")
@@ -297,7 +314,32 @@ class KaggleManagerGitHub:
         self.logger.info("👀 Step 3: Starting enhanced monitoring...")
         success = self._monitor_kernel_with_session_detection(kernel_slug, timeout)
         
-        return success
+        return success, kernel_slug if success else None
+
+    def run_github_workflow(self, 
+                           repo_url: str = "https://github.com/elonmj/rl-portfolio-optimizer.git", 
+                           branch: str = "feature/training-config-updates", 
+                           episodes: int = 1,
+                           timeout: int = 3600) -> Optional[str]:
+        """
+        Simplified workflow that returns kernel_slug on success.
+        
+        Args:
+            repo_url: GitHub repository URL (must be public)
+            branch: Git branch to clone  
+            episodes: Number of training episodes
+            timeout: Maximum monitoring time
+            
+        Returns:
+            Optional[str]: kernel_slug if successful, None if failed
+        """
+        success, kernel_slug = self.create_and_run_github_workflow(
+            repo_url=repo_url,
+            branch=branch,
+            episodes=episodes, 
+            timeout=timeout
+        )
+        return kernel_slug if success else None
 
     def _create_and_upload_github_kernel(self, repo_url: str, branch: str, episodes: int) -> Optional[str]:
         """
@@ -374,7 +416,7 @@ class KaggleManagerGitHub:
         Build the GitHub-based script content.
         
         Cette version est basée sur le script qui a fonctionné dans la discussion,
-        avec les marqueurs TRACKING_SUCCESS pour le monitoring.
+        avec les marqueurs TRACKING_SUCCESS pour le monitoring ET FileHandler remote.
         """
         return f'''#!/usr/bin/env python3
 # RL Portfolio Optimizer - Kaggle Training Script (GitHub-based)
@@ -384,23 +426,48 @@ import sys
 import os
 import subprocess
 import json
+import shutil
+import logging
 from datetime import datetime
 from pathlib import Path
 
 print("=== RL Portfolio Optimizer - GitHub Setup ===")
+
+# Setup remote FileHandler logging with immediate flush
+def setup_remote_logging():
+    logger = logging.getLogger('kaggle_remote')
+    logger.setLevel(logging.INFO)
+    
+    # File handler for remote log.txt
+    log_file = "/kaggle/working/log.txt"
+    handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    return logger, handler
+
+# Initialize remote logging
+remote_logger, log_handler = setup_remote_logging()
+
+def log_and_print(level, message):
+    """Log to both console and remote log.txt with immediate flush."""
+    print(message)
+    getattr(remote_logger, level.lower())(message)
+    log_handler.flush()  # Force immediate flush
 
 # Configuration
 REPO_URL = "{repo_url}"
 BRANCH = "{branch}"
 REPO_DIR = "/kaggle/working/rl-portfolio-optimizer"
 
-print(f"Repository: {{REPO_URL}}")
-print(f"Branch: {{BRANCH}}")
-print(f"Episodes: {episodes}")
+log_and_print("info", f"Repository: {{REPO_URL}}")
+log_and_print("info", f"Branch: {{BRANCH}}")
+log_and_print("info", f"Episodes: {episodes}")
 
 try:
     # Clone repository with git
-    print("\\n[INFO] Cloning repository from GitHub...")
+    log_and_print("info", "\\n[INFO] Cloning repository from GitHub...")
     
     # Ensure we use HTTPS URL for public access
     if REPO_URL.startswith("git@"):
@@ -408,7 +475,7 @@ try:
     else:
         repo_https = REPO_URL
     
-    print(f"🎯 TRACKING_PROGRESS: Cloning from {{repo_https}}")
+    log_and_print("info", f"🎯 TRACKING_PROGRESS: Cloning from {{repo_https}}")
     
     # Clone with specific branch (public repo, no auth needed)
     clone_cmd = [
@@ -418,30 +485,30 @@ try:
         repo_https, REPO_DIR
     ]
     
-    print(f"Running: {{' '.join(clone_cmd)}}")
+    log_and_print("info", f"Running: {{' '.join(clone_cmd)}}")
     result = subprocess.run(clone_cmd, capture_output=True, text=True, timeout=300)
     
     if result.returncode == 0:
-        print("[OK] Repository cloned successfully!")
-        print(f"🎯 TRACKING_SUCCESS: Repository cloned from {{BRANCH}} branch")
+        log_and_print("info", "[OK] Repository cloned successfully!")
+        log_and_print("info", f"🎯 TRACKING_SUCCESS: Repository cloned from {{BRANCH}} branch")
         
         # List cloned contents
         if os.path.exists(REPO_DIR):
             files = os.listdir(REPO_DIR)
-            print(f"[INFO] Cloned files: {{len(files)}} items")
+            log_and_print("info", f"[INFO] Cloned files: {{len(files)}} items")
             for f in sorted(files)[:10]:  # First 10 items
-                print(f"  - {{f}}")
-        print(f"🎯 TRACKING_PROGRESS: File listing completed")
+                log_and_print("info", f"  - {{f}}")
+        log_and_print("info", f"🎯 TRACKING_PROGRESS: File listing completed")
     else:
-        print(f"[ERROR] Git clone failed:")
-        print(f"STDOUT: {{result.stdout}}")
-        print(f"STDERR: {{result.stderr}}")
-        print(f"🎯 TRACKING_ERROR: Git clone failed - {{result.stderr}}")
+        log_and_print("error", f"[ERROR] Git clone failed:")
+        log_and_print("error", f"STDOUT: {{result.stdout}}")
+        log_and_print("error", f"STDERR: {{result.stderr}}")
+        log_and_print("error", f"🎯 TRACKING_ERROR: Git clone failed - {{result.stderr}}")
         sys.exit(1)
     
     # Change to repository directory
     os.chdir(REPO_DIR)
-    print(f"[INFO] Changed to directory: {{os.getcwd()}}")
+    log_and_print("info", f"[INFO] Changed to directory: {{os.getcwd()}}")
     
     # Verify essential files exist
     essential_files = ["train.py", "config.py", "agent.py", "environment.py", "models.py"]
@@ -451,64 +518,74 @@ try:
         if not os.path.exists(file):
             missing_files.append(file)
         else:
-            print(f"[OK] Found {{file}}")
+            log_and_print("info", f"[OK] Found {{file}}")
     
     if missing_files:
-        print(f"[ERROR] Missing essential files: {{missing_files}}")
+        log_and_print("error", f"[ERROR] Missing essential files: {{missing_files}}")
         sys.exit(1)
     
     # Install requirements if present
     if os.path.exists("requirements.txt"):
-        print("\\n[INFO] Installing requirements...")
-        print("🎯 TRACKING_PROGRESS: Starting requirements installation")
+        log_and_print("info", "\\n[INFO] Installing requirements...")
+        log_and_print("info", "🎯 TRACKING_PROGRESS: Starting requirements installation")
         subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], 
                       check=True, timeout=600)
-        print("[OK] Requirements installed")
-        print("🎯 TRACKING_SUCCESS: Requirements installation completed")
+        log_and_print("info", "[OK] Requirements installed")
+        log_and_print("info", "🎯 TRACKING_SUCCESS: Requirements installation completed")
     
     # Set environment variable for number of episodes (CRITICAL)
     os.environ['TRAINING_EPISODES'] = str({episodes})
-    print(f"[INFO] Set TRAINING_EPISODES environment variable to: {episodes}")
+    log_and_print("info", f"[INFO] Set TRAINING_EPISODES environment variable to: {episodes}")
     
     # Import and run training
-    print("\\n[INFO] Starting training...")
-    print("🎯 TRACKING_PROGRESS: Initializing training module")
+    log_and_print("info", "\\n[INFO] Starting training...")
+    log_and_print("info", "🎯 TRACKING_PROGRESS: Initializing training module")
     sys.path.insert(0, os.getcwd())
     
     # Import config and verify episodes configuration
     from config import Config
     training_config = Config.get_training_config_for_environment()
     actual_episodes = training_config.get('max_episodes', 1)
-    print(f"[INFO] Configuration loaded - Episodes to run: {{actual_episodes}}")
+    log_and_print("info", f"[INFO] Configuration loaded - Episodes to run: {{actual_episodes}}")
     
     # Import training script
     import train
-    print("🎯 TRACKING_PROGRESS: Train module imported successfully")
+    log_and_print("info", "🎯 TRACKING_PROGRESS: Train module imported successfully")
     
     # Run training with explicit episodes parameter
     if hasattr(train, 'main'):
-        print(f"🎯 TRACKING_PROGRESS: Executing train.main(num_episodes={episodes})")
+        log_and_print("info", f"🎯 TRACKING_PROGRESS: Executing train.main(num_episodes={episodes})")
         train.main(num_episodes={episodes})
     else:
-        print("🎯 TRACKING_PROGRESS: Executing train.py content directly")
+        log_and_print("info", "🎯 TRACKING_PROGRESS: Executing train.py content directly")
         exec(open('train.py').read())
     
-    print("\\n[OK] Training completed successfully!")
-    print("🎯 TRACKING_SUCCESS: Training execution finished successfully")
+    log_and_print("info", "\\n[OK] Training completed successfully!")
+    log_and_print("info", "🎯 TRACKING_SUCCESS: Training execution finished successfully")
     
 except subprocess.TimeoutExpired:
-    print("[ERROR] Git clone timeout - repository too large or network issues")
+    log_and_print("error", "[ERROR] Git clone timeout - repository too large or network issues")
     sys.exit(1)
 except subprocess.CalledProcessError as e:
-    print(f"[ERROR] Command failed: {{e}}")
+    log_and_print("error", f"[ERROR] Command failed: {{e}}")
     sys.exit(1)
 except Exception as e:
-    print(f"[ERROR] Training failed: {{e}}")
-    print("Traceback:")
+    log_and_print("error", f"[ERROR] Training failed: {{e}}")
+    log_and_print("error", "Traceback:")
     import traceback
-    traceback.print_exc()
+    log_and_print("error", traceback.format_exc())
     sys.exit(1)
 finally:
+    # Cleanup: remove cloned repository to keep only results in output
+    try:
+        import shutil
+        if os.path.exists(REPO_DIR):
+            log_and_print("info", f"[INFO] Cleaning up cloned repository: {{REPO_DIR}}")
+            shutil.rmtree(REPO_DIR)
+            log_and_print("info", "✓ Cleanup completed - only results will remain in kernel output")
+    except Exception as e:
+        log_and_print("warning", f"[WARN] Could not cleanup repository: {{e}}")
+    
     # Create results summary (SESSION_SUMMARY.JSON - KEY FOR DETECTION!)
     try:
         results_dir = "/kaggle/working/results"
@@ -526,10 +603,18 @@ finally:
         with open(os.path.join(results_dir, "session_summary.json"), "w") as f:
             json.dump(summary, f, indent=2)
         
-        print(f"\\n[INFO] Results saved with session_summary.json")
-        print("🎯 TRACKING_SUCCESS: Session summary created")
+        log_and_print("info", f"\\n[INFO] Results saved with session_summary.json")
+        log_and_print("info", "🎯 TRACKING_SUCCESS: Session summary created")
     except Exception as e:
-        print(f"[WARN] Could not save results: {{e}}")
+        log_and_print("warning", f"[WARN] Could not save results: {{e}}")
+    
+    # Final flush and close remote logging
+    try:
+        log_and_print("info", "🎯 FINAL: Remote logging completed - log.txt ready for download")
+        log_handler.flush()
+        log_handler.close()
+    except Exception as e:
+        print(f"[WARN] Could not finalize remote logging: {{e}}")
 '''
 
     def _monitor_kernel_with_session_detection(self, kernel_slug: str, timeout: int = 3600) -> bool:
@@ -640,7 +725,40 @@ finally:
                         
                 self.logger.info(f"💾 Persisted kernel artifacts to: {persist_dir}")
 
-                # PRIORITY 1: Look for session_summary.json (most reliable indicator)
+                # PRIORITY 1: Look for remote log.txt (most reliable - our own FileHandler)
+                remote_log_found = False
+                remote_log_path = os.path.join(temp_dir, 'log.txt')
+                
+                if os.path.exists(remote_log_path):
+                    self.logger.info(f"🎯 Found remote log.txt at: {remote_log_path}")
+                    
+                    try:
+                        with open(remote_log_path, 'r', encoding='utf-8') as f:
+                            log_content = f.read()
+                        
+                        # Copy remote log to persist directory
+                        shutil.copy2(remote_log_path, persist_dir / 'remote_log.txt')
+                        self.logger.info("💾 Remote log.txt saved to persist directory")
+                        
+                        # Check for success in remote log
+                        success_found = any(keyword in log_content for keyword in success_keywords)
+                        error_found = any(keyword in log_content for keyword in error_keywords)
+                        
+                        if success_found:
+                            self.logger.info("✅ Success indicators found in remote log.txt")
+                            remote_log_found = True
+                        
+                        if error_found:
+                            self.logger.warning("⚠️ Error indicators found in remote log.txt")
+                            # Log the specific errors we found
+                            for keyword in error_keywords:
+                                if keyword in log_content:
+                                    self.logger.error(f"🔍 Remote error detected: {keyword}")
+                                    
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ Could not parse remote log.txt: {e}")
+
+                # PRIORITY 2: Look for session_summary.json (fallback)
                 session_summary_found = False
                 for root, dirs, files in os.walk(temp_dir):
                     if 'session_summary.json' in files:
@@ -665,55 +783,98 @@ finally:
                         except Exception as e:
                             self.logger.warning(f"⚠️ Could not parse session_summary.json: {e}")
 
-                # PRIORITY 2: Analyze log files for success/error keywords
-                log_analysis_success = False
-                log_files = []
-                
-                # Find log-like files
-                for file in os.listdir(temp_dir):
-                    if file.endswith(('.log', '.txt')) or file in ['__stdout__.txt', '__stderr__.txt']:
-                        log_files.append(os.path.join(temp_dir, file))
-                
-                # Analyze logs
-                if log_files:
-                    for log_file in log_files:
-                        self.logger.info(f"📄 Analyzing log file: {os.path.basename(log_file)}")
-                        
-                        try:
-                            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                                log_content = f.read()
-                            
-                            # Check for success indicators
-                            success_found = any(keyword in log_content for keyword in success_keywords)
-                            error_found = any(keyword in log_content for keyword in error_keywords)
-                            
-                            if success_found:
-                                self.logger.info("✅ Success indicators found in logs")
-                                log_analysis_success = True
+                # PRIORITY 3: Analyze other log files if needed (last resort)
+                stdout_log_found = False
+                if not remote_log_found and not session_summary_found:
+                    log_files = []
+                    for file in os.listdir(temp_dir):
+                        if file.endswith(('.log', '.txt')) and file != 'log.txt':
+                            log_files.append(os.path.join(temp_dir, file))
+                    
+                    if log_files:
+                        self.logger.info("� Analyzing fallback log files...")
+                        for log_file in log_files:
+                            try:
+                                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                    log_content = f.read()
                                 
-                            if error_found:
-                                self.logger.warning("⚠️ Error indicators found in logs")
-                                
-                            # Save primary log to persist directory  
-                            if 'stdout' in os.path.basename(log_file) or log_file == log_files[0]:
-                                with open(persist_dir / 'primary_log.txt', 'w', encoding='utf-8', errors='ignore') as f:
-                                    f.write(log_content)
-                                
-                        except Exception as e:
-                            self.logger.error(f"❌ Error reading log {log_file}: {e}")
+                                success_found = any(keyword in log_content for keyword in success_keywords)
+                                if success_found:
+                                    self.logger.info(f"✅ Success found in {os.path.basename(log_file)}")
+                                    stdout_log_found = True
+                                    break
+                                    
+                            except Exception as e:
+                                self.logger.error(f"❌ Error reading {log_file}: {e}")
                 
-                # Final decision: session_summary.json has priority
-                if session_summary_found:
+                # Final decision: remote log.txt has priority
+                if remote_log_found:
+                    self.logger.info("✅ Success confirmed via remote log.txt (FileHandler)")
                     return True
-                elif log_analysis_success:
-                    self.logger.info("✅ Success detected via log analysis (no session_summary.json)")
+                elif session_summary_found:
+                    self.logger.info("✅ Success confirmed via session_summary.json")
+                    return True
+                elif stdout_log_found:
+                    self.logger.info("✅ Success detected via fallback log analysis")
                     return True
                 else:
-                    self.logger.warning("⚠️ No clear success indicators found")
+                    self.logger.warning("⚠️ No clear success indicators found in any logs")
                     return False
                     
         except Exception as e:
             self.logger.error(f"❌ Error retrieving logs: {e}")
+            return False
+
+    def download_results(self, kernel_slug: str, output_dir: str = "results") -> bool:
+        """
+        Download kernel results using kaggle kernels output command.
+        
+        Args:
+            kernel_slug: The kernel identifier (e.g., "elonmj/rl-portfolio-optimizer-training-tjxh")
+            output_dir: Local directory to save results
+            
+        Returns:
+            bool: True if download successful
+        """
+        try:
+            self.logger.info(f"📥 Downloading results for kernel: {kernel_slug}")
+            
+            # Check kernel status first
+            status_response = self.api.kernels_status(kernel_slug)
+            current_status = getattr(status_response, 'status', 'unknown')
+            self.logger.info(f"⏱️ Kernel status: {current_status}")
+            
+            if current_status not in ['complete', 'error']:
+                self.logger.warning(f"⚠️ Kernel status is '{current_status}', results might not be complete")
+            
+            # Create output directory
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            # Download using kaggle API
+            self.logger.info(f"📦 Downloading to: {output_path.absolute()}")
+            self.api.kernels_output(kernel_slug, path=str(output_path), force=True, quiet=False)
+            
+            # Check if session_summary.json was downloaded (indicates cleanup worked)
+            session_summary = output_path / "session_summary.json"
+            if session_summary.exists():
+                self.logger.info("🎯 session_summary.json found - cleanup worked correctly!")
+                with open(session_summary, 'r') as f:
+                    summary = json.load(f)
+                    self.logger.info(f"📊 Session status: {summary.get('status', 'unknown')}")
+            else:
+                self.logger.warning("⚠️ session_summary.json not found - check if cleanup worked")
+            
+            # List downloaded files
+            downloaded_files = list(output_path.glob('*'))
+            self.logger.info(f"📁 Downloaded {len(downloaded_files)} items:")
+            for file in downloaded_files:
+                self.logger.info(f"  - {file.name}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to download results: {e}")
             return False
 
     def get_kernel_logs(self, kernel_slug: str) -> Dict[str, Any]:
@@ -759,12 +920,15 @@ def run_kaggle_training(episodes: int = 1,
     """
     try:
         manager = KaggleManagerGitHub()
-        return manager.create_and_run_github_workflow(
+        success, kernel_slug = manager.create_and_run_github_workflow(
             repo_url=repo_url,
             branch=branch, 
             episodes=episodes,
             timeout=timeout
         )
+        if success and kernel_slug:
+            print(f"✅ Kernel completed successfully: {kernel_slug}")
+        return success
     except Exception as e:
         print(f"Error running Kaggle training: {e}")
         return False
