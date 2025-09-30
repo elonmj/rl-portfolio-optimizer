@@ -284,7 +284,19 @@ class PolicyNetwork(nn.Module):
     
     def sample(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         mean, log_std = self.forward(state)
+        
+        # Protect against NaN values
+        mean = torch.clamp(mean, -10, 10)
+        log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
         std = log_std.exp()
+        
+        # Check for NaN/Inf before creating distribution
+        if torch.isnan(mean).any() or torch.isinf(mean).any():
+            print(f"⚠️ NaN/Inf detected in mean: {mean}")
+            mean = torch.zeros_like(mean)
+        if torch.isnan(std).any() or torch.isinf(std).any():
+            print(f"⚠️ NaN/Inf detected in std: {std}")
+            std = torch.ones_like(std)
         
         normal = Normal(mean, std)
         x_t = normal.rsample()
@@ -525,8 +537,8 @@ def main():
     # Create agent
     agent = SACAgent(state_dim, action_dim, device)
     
-    # Training parameters (simplified for Kaggle)
-    num_episodes = 10  # Limited for Kaggle execution time
+    # Training parameters (use environment variable or default)
+    num_episodes = int(os.environ.get('TRAINING_EPISODES', 1))  # Use env var from script
     
     print(f"🚀 Starting training for {num_episodes} episodes...")
     

@@ -660,7 +660,7 @@ finally:
                     elapsed = time.time() - start_time
                     self.logger.info(f"⏱️ Status: {current_status} (after {elapsed:.1f}s)")
                     
-                    # Check if execution is complete
+                    # Check if execution is complete - STOP IMMEDIATELY on final status
                     if current_status in ['complete', 'error', 'cancelled']:
                         self.logger.info(f"🏁 Kernel execution finished with status: {current_status}")
                         
@@ -671,15 +671,16 @@ finally:
                             self.logger.info("✅ Workflow completed successfully!")
                             return True
                         elif current_status == 'error':
-                            self.logger.error(f"❌ Kernel failed with ERROR status - check logs for details")
+                            self.logger.error(f"❌ Kernel failed with ERROR status - stopping monitoring")
                             return False
                         elif current_status == 'cancelled':
-                            self.logger.error(f"❌ Kernel was cancelled - check logs for details")
+                            self.logger.error(f"❌ Kernel was cancelled - stopping monitoring")
                             return False
                         else:
-                            self.logger.error("❌ Workflow failed - check logs for details")
+                            self.logger.error("❌ Workflow failed - stopping monitoring")
                             return False
                     
+                    # Continue monitoring only if still running
                     # Adaptive interval (exponential backoff)
                     current_interval = min(current_interval * 1.5, max_interval)
                     self.logger.info(f"⏳ Next check in {current_interval:.0f}s...")
