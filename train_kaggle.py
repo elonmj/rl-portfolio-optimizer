@@ -270,6 +270,12 @@ class PolicyNetwork(nn.Module):
         self.mean_head = nn.Linear(hidden_dim, action_dim)
         self.log_std_head = nn.Linear(hidden_dim, action_dim)
         
+        # Stable initialization to prevent NaN
+        torch.nn.init.xavier_uniform_(self.fc1.weight)
+        torch.nn.init.xavier_uniform_(self.fc2.weight)
+        torch.nn.init.xavier_uniform_(self.mean_head.weight, gain=0.1)
+        torch.nn.init.xavier_uniform_(self.log_std_head.weight, gain=0.1)
+        
         self.log_std_min = -20
         self.log_std_max = 2
         
@@ -318,6 +324,11 @@ class QNetwork(nn.Module):
         self.fc1 = nn.Linear(state_dim + action_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, 1)
+        
+        # Stable initialization to prevent NaN
+        torch.nn.init.xavier_uniform_(self.fc1.weight)
+        torch.nn.init.xavier_uniform_(self.fc2.weight)
+        torch.nn.init.xavier_uniform_(self.fc3.weight, gain=0.1)
         
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         x = torch.cat([state, action], dim=-1)
@@ -444,12 +455,19 @@ class SACAgent:
         q1_loss = F.mse_loss(q1_pred, q_target)
         q2_loss = F.mse_loss(q2_pred, q_target)
         
+        # Check for NaN losses
+        if torch.isnan(q1_loss) or torch.isnan(q2_loss):
+            print(f"⚠️ NaN loss detected - skipping update")
+            return {}
+        
         self.q1_optimizer.zero_grad()
         q1_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q1.parameters(), 1.0)  # Gradient clipping
         self.q1_optimizer.step()
         
         self.q2_optimizer.zero_grad()
         q2_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q2.parameters(), 1.0)  # Gradient clipping
         self.q2_optimizer.step()
         
         # Update policy
@@ -460,9 +478,15 @@ class SACAgent:
         
         policy_loss = (self.alpha * log_probs - q_new).mean()
         
-        self.policy_optimizer.zero_grad()
-        policy_loss.backward()
-        self.policy_optimizer.step()
+        # Check for NaN policy loss
+        if torch.isnan(policy_loss):
+            print(f"⚠️ NaN policy loss detected - skipping policy update")
+            policy_loss = torch.tensor(0.0)
+        else:
+            self.policy_optimizer.zero_grad()
+            policy_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 1.0)  # Gradient clipping
+            self.policy_optimizer.step()
         
         # Update target networks
         for target_param, param in zip(self.q1_target.parameters(), self.q1.parameters()):
