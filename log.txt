@@ -257,3 +257,48 @@
 2025-09-30 18:04:22,549 - kaggle_manager_github - INFO - 📥 Downloading kernel output for: elonmj/rl-portfolio-optimizer-training-fhqd
 2025-09-30 18:04:25,418 - kaggle_manager_github - ERROR - ❌ Error retrieving logs: 'charmap' codec can't encode characters in position 7842-7881: character maps to <undefined>
 2025-09-30 18:04:25,419 - kaggle_manager_github - ERROR - ❌ Workflow failed - stopping monitoring
+2025-09-30 21:20:39,625 - kaggle_manager_github - INFO - ✅ Authenticated with Kaggle API
+2025-09-30 21:20:39,653 - kaggle_manager_github - INFO - 🚀 Starting Complete GitHub-based Kaggle Workflow
+2025-09-30 21:20:39,655 - kaggle_manager_github - INFO - 📂 Repository: https://github.com/elonmj/rl-portfolio-optimizer.git
+2025-09-30 21:20:39,657 - kaggle_manager_github - INFO - 🌿 Branch: feature/training-config-updates
+2025-09-30 21:20:39,670 - kaggle_manager_github - INFO - 🎯 Episodes: 1
+2025-09-30 21:20:39,672 - kaggle_manager_github - INFO - 🔄 Step 1: Ensuring Git repository is up to date...
+2025-09-30 21:20:39,674 - kaggle_manager_github - INFO - 🔍 Checking Git status and ensuring changes are pushed...
+2025-09-30 21:20:39,993 - kaggle_manager_github - INFO - 📍 Current branch: feature/training-config-updates
+2025-09-30 21:20:40,151 - kaggle_manager_github - INFO - 📝 Detected local changes:
+2025-09-30 21:20:40,152 - kaggle_manager_github - INFO -   D  aggle_manager.py (Deleted (staged))
+2025-09-30 21:20:40,154 - kaggle_manager_github - INFO -    M kaggle_manager_github.py (Modified (unstaged))
+2025-09-30 21:20:40,155 - kaggle_manager_github - INFO -    M log.txt (Modified (unstaged))
+2025-09-30 21:20:40,157 - kaggle_manager_github - INFO - 📦 Adding all changes...
+2025-09-30 21:20:40,393 - kaggle_manager_github - INFO - 💾 Committing changes...
+2025-09-30 21:20:40,716 - kaggle_manager_github - INFO - ✅ Changes committed successfully
+2025-09-30 21:20:40,716 - kaggle_manager_github - INFO - 📤 Pushing to remote branch: feature/training-config-updates
+2025-09-30 21:20:47,430 - kaggle_manager_github - INFO - ✅ Changes pushed successfully to GitHub
+2025-09-30 21:20:47,432 - kaggle_manager_github - INFO - ✅ Git repository is up to date - proceeding with Kaggle workflow
+2025-09-30 21:20:47,433 - kaggle_manager_github - INFO - 📝 Step 2: Creating GitHub-based kernel...
+2025-09-30 21:20:47,436 - kaggle_manager_github - INFO - 📋 GitHub script created: rl-portfolio-optimizer-training-xzvb
+2025-09-30 21:20:47,439 - kaggle_manager_github - INFO - ⬆️ Uploading GitHub-based script...
+2025-09-30 21:20:50,439 - kaggle_manager_github - INFO - ✅ GitHub script uploaded: elonmj/rl-portfolio-optimizer-training-xzvb
+2025-09-30 21:20:50,445 - kaggle_manager_github - INFO - ✅ GitHub kernel uploaded: elonmj/rl-portfolio-optimizer-training-xzvb
+2025-09-30 21:20:50,446 - kaggle_manager_github - INFO - 🔗 URL: https://www.kaggle.com/code/elonmj/rl-portfolio-optimizer-training-xzvb
+2025-09-30 21:20:50,448 - kaggle_manager_github - INFO - 👀 Step 3: Starting enhanced monitoring...
+2025-09-30 21:20:50,454 - kaggle_manager_github - INFO - 🔍 Enhanced monitoring started for: elonmj/rl-portfolio-optimizer-training-xzvb
+2025-09-30 21:20:50,462 - kaggle_manager_github - INFO - ⏱️ Timeout: 3600s, Adaptive intervals: 10s → 120s
+2025-09-30 21:20:51,069 - kaggle_manager_github - INFO - ⏱️ Status: KernelWorkerStatus.QUEUED (after 0.6s)
+2025-09-30 21:20:51,092 - kaggle_manager_github - INFO - ⏳ Next check in 15s...
+2025-09-30 21:21:06,629 - kaggle_manager_github - INFO - ⏱️ Status: KernelWorkerStatus.RUNNING (after 16.2s)
+2025-09-30 21:21:06,639 - kaggle_manager_github - INFO - ⏳ Next check in 22s...
+2025-09-30 21:21:29,854 - kaggle_manager_github - INFO - ⏱️ Status: KernelWorkerStatus.RUNNING (after 39.4s)
+2025-09-30 21:21:29,854 - kaggle_manager_github - INFO - ⏳ Next check in 34s...
+2025-09-30 21:22:04,143 - kaggle_manager_github - INFO - ⏱️ Status: KernelWorkerStatus.RUNNING (after 73.7s)
+2025-09-30 21:22:04,144 - kaggle_manager_github - INFO - ⏳ Next check in 51s...
+2025-09-30 21:22:55,351 - kaggle_manager_github - INFO - ⏱️ Status: KernelWorkerStatus.RUNNING (after 124.9s)
+2025-09-30 21:22:55,352 - kaggle_manager_github - INFO - ⏳ Next check in 76s...
+2025-09-30 21:24:11,809 - kaggle_manager_github - INFO - ⏱️ Status: KernelWorkerStatus.COMPLETE (after 201.4s)
+2025-09-30 21:24:11,810 - kaggle_manager_github - INFO - 🏁 Kernel execution finished with status: KernelWorkerStatus.COMPLETE
+2025-09-30 21:24:11,810 - kaggle_manager_github - INFO - 📋 Retrieving execution logs...
+2025-09-30 21:24:11,812 - kaggle_manager_github - INFO - 📥 Downloading kernel output for: elonmj/rl-portfolio-optimizer-training-xzvb
+2025-09-30 21:24:14,960 - kaggle_manager_github - WARNING - ⚠️ Unicode encoding issue during download: 'charmap' codec can't encode characters in position 7851-7890: character maps to <undefined>
+2025-09-30 21:24:19,476 - kaggle_manager_github - ERROR - ❌ Alternative download method failed: Subprocess failed: 
+2025-09-30 21:24:19,478 - kaggle_manager_github - ERROR - ❌ Error retrieving logs: 'charmap' codec can't encode characters in position 7851-7890: character maps to <undefined>
+2025-09-30 21:24:19,480 - kaggle_manager_github - ERROR - ❌ Workflow failed - stopping monitoring
