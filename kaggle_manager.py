@@ -97,26 +97,24 @@ class KaggleManager:
         if missing_vars:
             raise ValueError(
                 f"Missing required environment variables: {missing_vars}. "
-                f"Please set them in your .env file or environment."
+                "Set KAGGLE_USERNAME and KAGGLE_KEY in your environment."
             )
-            
         self.logger.info("Environment variables validated successfully")
-        
+
     def _authenticate(self) -> None:
         """Authenticate with Kaggle API using environment variables."""
         try:
             self.api.authenticate()
-            self.logger.info("Successfully authenticated with Kaggle API")
+            self.logger.info("Authenticated with Kaggle API")
         except Exception as e:
-            self.logger.error(f"Authentication failed: {str(e)}")
-            raise RuntimeError(f"Kaggle authentication failed: {str(e)}")
-            
+            raise RuntimeError(f"Kaggle authentication failed: {e}")
+
     def _get_username(self) -> str:
         """Get authenticated Kaggle username."""
         return os.environ.get('KAGGLE_USERNAME', '')
-        
+
     def _get_default_kernel_config(self) -> Dict[str, Any]:
-        """Get default kernel configuration for RL portfolio optimizer."""
+        """Default kernel configuration for RL portfolio optimizer."""
         return {
             "language": "python",
             "kernel_type": "script",
@@ -130,86 +128,32 @@ class KaggleManager:
             "competition_sources": [],
             "model_sources": []
         }
-        
-    def is_kaggle_environment(self) -> bool:
-        """
-        Detect if code is running in Kaggle kernel environment.
-        
-        Returns:
-            bool: True if running in Kaggle kernel, False otherwise
-        """
-        # Check for Kaggle-specific environment indicators
-        kaggle_indicators = [
-            os.path.exists('/kaggle/input'),
-            os.path.exists('/kaggle/working'),
-            'KAGGLE_KERNEL_RUN_TYPE' in os.environ,
-            'KAGGLE_URL_BASE' in os.environ
-        ]
-        
-        return any(kaggle_indicators)
-        
+
     def get_kaggle_paths(self) -> Dict[str, str]:
-        """
-        Get Kaggle-specific file paths for input and output.
-        
-        Returns:
-            Dict with 'input', 'working', and 'output' paths
-        """
-        if self.is_kaggle_environment():
-            return {
-                'input': '/kaggle/input',
-                'working': '/kaggle/working',
-                'output': '/kaggle/working'  # Working dir is used for outputs
-            }
+        """Get Kaggle-specific file paths for input and output."""
+        if is_kaggle_environment():
+            return {"input": "/kaggle/input", "working": "/kaggle/working", "output": "/kaggle/working"}
         else:
-            # Local development paths
-            return {
-                'input': str(Path.cwd() / 'datas'),
-                'working': str(Path.cwd()),
-                'output': str(Path.cwd() / 'results')
-            }
-            
+            cwd = str(Path.cwd())
+            return {"input": str(Path(cwd) / "datas"), "working": cwd, "output": str(Path(cwd) / "results")}
+
     def generate_kernel_name(self, task_type: str = "training") -> str:
-        """
-        Generate unique kernel name with timestamp and random suffix.
-        
-        Args:
-            task_type: Type of task (training, evaluation, etc.)
-            
-        Returns:
-            Unique kernel name string
-        """
-        import random
-        import string
-        
+        """Generate unique kernel name with timestamp and random suffix."""
+        import random, string
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        # Add random suffix to ensure uniqueness
         random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
         return f"{self.kernel_base_name}-{task_type}-{timestamp}-{random_suffix}"
-        
-    def create_kernel_metadata(self, 
-                             kernel_name: str,
-                             title: str,
-                             code_file: str,
-                             description: str = "",
-                             custom_config: Optional[Dict] = None) -> Dict[str, Any]:
-        """
-        Create kernel metadata JSON for Kaggle submission.
-        
-        Args:
-            kernel_name: Unique kernel name
-            title: Human-readable kernel title
-            code_file: Main Python script file
-            description: Kernel description
-            custom_config: Custom configuration overrides
-            
-        Returns:
-            Complete kernel metadata dictionary
-        """
+
+    def create_kernel_metadata(self,
+                               kernel_name: str,
+                               title: str,
+                               code_file: str,
+                               description: str = "",
+                               custom_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Create kernel metadata JSON for Kaggle submission."""
         config = self.default_config.copy()
         if custom_config:
             config.update(custom_config)
-            
         metadata = {
             "id": f"{self.username}/{kernel_name}",
             "title": title,
@@ -224,12 +168,10 @@ class KaggleManager:
             "dataset_sources": config["dataset_sources"],
             "kernel_sources": config["kernel_sources"],
             "competition_sources": config["competition_sources"],
-            "model_sources": config["model_sources"]
+            "model_sources": config["model_sources"],
         }
-        
         if description:
             metadata["description"] = description
-            
         self.logger.info(f"Generated kernel metadata for: {kernel_name}")
         return metadata
         
@@ -436,36 +378,96 @@ class KaggleManager:
         try:
             self.logger.info("📋 Retrieving execution logs...")
             
-            # Get kernel logs
-            logs_response = self.api.kernels_output(kernel_slug)
-            
-            if logs_response and 'log' in logs_response:
-                log_content = logs_response['log']
-                
+            import tempfile, os
+            # Download artifacts to a temp dir first
+            with tempfile.TemporaryDirectory() as temp_dir:
+                self.logger.info(f"📥 Downloading kernel output for: {kernel_slug}")
+                self.api.kernels_output(kernel_slug, path=temp_dir, quiet=True)
+
+                # Persist artifacts into test_output/results/<slug>
+                persist_dir = Path('test_output') / 'results' / kernel_slug.replace('/', '_')
+                persist_dir.mkdir(parents=True, exist_ok=True)
+                for name in os.listdir(temp_dir):
+                    try:
+                        shutil.copy2(os.path.join(temp_dir, name), persist_dir / name)
+                    except Exception:
+                        pass
+                self.logger.info(f"💾 Persisted kernel artifacts to: {persist_dir}")
+
+                # Prefer using a session summary if present
+                summary_path = None
+                for root, _, fnames in os.walk(temp_dir):
+                    if 'session_summary.json' in fnames:
+                        summary_path = os.path.join(root, 'session_summary.json')
+                        break
+                if summary_path and os.path.exists(summary_path):
+                    try:
+                        with open(summary_path, 'r', encoding='utf-8', errors='replace') as f:
+                            summary = json.load(f)
+                        try:
+                            shutil.copy2(summary_path, persist_dir / 'session_summary.json')
+                        except Exception:
+                            pass
+                        status = (summary.get('status') or summary.get('state') or '').lower()
+                        self.logger.info(f"Found session_summary.json with status='{status}' at: {summary_path}")
+                        if status in ('completed', 'success', 'ok', 'done'):
+                            return True
+                    except Exception as _e:
+                        self.logger.info(f"session_summary.json present but parse failed: {_e}")
+
+                files = os.listdir(temp_dir)
+                self.logger.info(f"Files: {files}")
+                # Prefer log files, then stdout/stderr, then HTML
+                preferred = [
+                    [f for f in files if f.lower().endswith('.log')],
+                    [f for f in files if f in ('__stdout__.txt', '__stderr__.txt')],
+                    ['__results__.html'] if '__results__.html' in files else []
+                ]
+                chosen = None
+                for group in preferred:
+                    if group:
+                        chosen = group[0]
+                        break
+
+                if not chosen:
+                    self.logger.warning("No log-like files available yet. Check live logs:")
+                    self.logger.info(f"Live: https://www.kaggle.com/code/{kernel_slug}/log")
+                    return False
+
+                src = Path(temp_dir) / chosen
+                # Robust read to avoid Windows encoding errors
+                try:
+                    text = src.read_text(encoding='utf-8', errors='replace')
+                except Exception:
+                    try:
+                        raw = src.read_bytes()
+                        text = raw.decode('utf-8', errors='replace')
+                    except Exception:
+                        text = ''
+
                 self.logger.info("=" * 60)
-                self.logger.info("📊 KERNEL EXECUTION LOGS")
+                self.logger.info("KERNEL EXECUTION LOGS (excerpt)")
                 self.logger.info("=" * 60)
-                
-                # Display log content
-                for line in log_content.split('\n'):
+                for line in text.splitlines()[:200]:
                     if line.strip():
-                        self.logger.info(f"LOG: {line}")
-                
+                        try:
+                            self.logger.info(line)
+                        except Exception:
+                            pass
                 self.logger.info("=" * 60)
-                
-                # Save logs to file
-                log_file = Path("kaggle_results") / f"{kernel_slug.replace('/', '_')}.log"
-                log_file.parent.mkdir(exist_ok=True)
-                
-                with open(log_file, 'w', encoding='utf-8') as f:
-                    f.write(log_content)
-                
-                self.logger.info(f"💾 Logs saved to: {log_file}")
+
+                # Save a primary log copy
+                dst = persist_dir / (kernel_slug.replace('/', '_') + f".{src.suffix.lstrip('.')}")
+                try:
+                    shutil.copy2(src, dst)
+                except Exception:
+                    # Fallback: write text content if copy fails
+                    try:
+                        dst.write_text(text, encoding='utf-8', errors='replace')
+                    except Exception:
+                        pass
+                self.logger.info(f"💾 Primary log saved to: {dst}")
                 return True
-                
-            else:
-                self.logger.warning("⚠️ No logs available or logs not ready yet")
-                return False
                 
         except Exception as e:
             self.logger.error(f"❌ Error retrieving logs: {e}")
@@ -573,7 +575,6 @@ class KaggleManager:
             source_files: List of Python source files to include
             data_files: List of data files to include  
             output_dir: Directory to create the kernel package
-            task_type: Type of task (training, evaluation, etc.)
             
         Returns:
             Path to prepared kernel package directory
@@ -603,12 +604,8 @@ class KaggleManager:
                     f.write(cleaned_content)
                 
                 self.logger.info(f"  📄 Added standalone Kaggle script: train.py")
-                main_script = "train.py"
-            else:
-                self.logger.error("❌ train_kaggle.py not found!")
-                raise FileNotFoundError("train_kaggle.py is required for Kaggle training")
         else:
-            # For other tasks, use the original approach
+            # For non-training tasks, copy source files
             for source_file in source_files:
                 src_path = Path(source_file)
                 if src_path.exists():
@@ -639,8 +636,8 @@ class KaggleManager:
                         self.logger.info(f"  📄 Added: {src_path.name}")
                 else:
                     self.logger.warning(f"  ⚠️ Source file not found: {source_file}")
-            
-            main_script = source_files[0] if source_files and task_type != "training" else "train.py"
+        
+        main_script = source_files[0] if source_files and task_type != "training" else "train.py"
         
         # Copy data files if provided, or copy default data for training
         if data_files:
@@ -1592,6 +1589,30 @@ finally:
                 # Download kernel output (includes logs)
                 self.api.kernels_output(kernel_slug, path=temp_dir, quiet=True)
                 
+                # First, look for a session summary file produced by the kernel
+                summary_path = None
+                for root, _, files in os.walk(temp_dir):
+                    if 'session_summary.json' in files:
+                        summary_path = os.path.join(root, 'session_summary.json')
+                        break
+                if summary_path and os.path.exists(summary_path):
+                    try:
+                        with open(summary_path, 'r', encoding='utf-8', errors='replace') as f:
+                            summary = json.load(f)
+                        status = (summary.get('status') or summary.get('state') or '').lower()
+                        self.logger.info(f"Found session_summary.json with status='{status}' at: {summary_path}")
+                        if status in ('completed', 'success', 'ok', 'done'):
+                            # Persist copy and return success early
+                            persist_dir = Path('test_output') / 'results' / kernel_slug.replace('/', '_')
+                            persist_dir.mkdir(parents=True, exist_ok=True)
+                            try:
+                                shutil.copy2(summary_path, persist_dir / 'session_summary.json')
+                            except Exception:
+                                pass
+                            return True
+                    except Exception as _e:
+                        self.logger.info(f"session_summary.json present but parsing failed: {_e}")
+
                 # Look for the log file
                 log_file = None
                 log_files = []
@@ -1601,30 +1622,63 @@ finally:
                         log_file = os.path.join(temp_dir, file)
                         
                 self.logger.info(f"📄 Log files found: {log_files}")
-                        
-                if not log_file or not os.path.exists(log_file):
-                    self.logger.warning("❌ No log file found")
+
+                # Persist all downloaded artifacts for inspection
+                from pathlib import Path as _P
+                persist_dir = _P('test_output') / 'results' / kernel_slug.replace('/', '_')
+                persist_dir.mkdir(parents=True, exist_ok=True)
+                for _name in os.listdir(temp_dir):
+                    try:
+                        shutil.copy2(os.path.join(temp_dir, _name), persist_dir / _name)
+                    except Exception:
+                        pass
+                self.logger.info(f"💾 Persisted kernel artifacts to: {persist_dir}")
+
+                # Choose best available log-like file
+                files = os.listdir(temp_dir)
+                candidates = []
+                candidates += [f for f in files if f.lower().endswith('.log')]
+                candidates += [f for f in files if f in ('__stdout__.txt', '__stderr__.txt')]
+                candidates += [f for f in files if 'log' in f.lower() and f not in candidates]
+                if '__results__.html' in files and '__results__.html' not in candidates:
+                    candidates.append('__results__.html')
+
+                if candidates:
+                    chosen = candidates[0]
+                    chosen_path = os.path.join(temp_dir, chosen)
+                else:
+                    self.logger.warning("No log-like files found in kernel output")
+                    self.logger.info(f"Live logs: https://www.kaggle.com/code/{kernel_slug}/log")
                     return False
-                    
-                # Parse log content
-                with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
-                    log_content = f.read()
-                    
-                if not log_content.strip():
-                    self.logger.warning("❌ Log file is empty")
+
+                # Read chosen content (HTML supported by naive tag strip for analysis)
+                with open(chosen_path, 'r', encoding='utf-8', errors='replace') as f:
+                    raw_content = f.read()
+
+                if not raw_content.strip():
+                    self.logger.warning("Selected log file is empty")
+                    self.logger.info(f"Live logs: https://www.kaggle.com/code/{kernel_slug}/log")
                     return False
-                    
-                self.logger.info(f"📊 Log content size: {len(log_content)} characters")
-                
+
+                is_html = chosen.lower().endswith('.html')
+                content_for_analysis = raw_content
+                if is_html:
+                    import re as _re
+                    content_for_analysis = _re.sub(r'<[^>]+>', '\n', raw_content)
+                    (persist_dir / 'logs_extracted.txt').write_text(content_for_analysis, encoding='utf-8', errors='replace')
+                    self.logger.info(f"📝 Extracted plain text from HTML to: {persist_dir / 'logs_extracted.txt'}")
+
+                self.logger.info(f"📊 Log content size: {len(content_for_analysis)} characters (from {chosen})")
+
                 # Parse JSON log entries (restore original parsing logic)
                 log_entries = []
                 try:
                     # Try to parse as JSON array first
-                    if log_content.startswith('[') and log_content.endswith(']'):
-                        log_entries = json.loads(log_content)
+                    if content_for_analysis.startswith('[') and content_for_analysis.endswith(']'):
+                        log_entries = json.loads(content_for_analysis)
                     else:
                         # Parse line by line for JSON objects
-                        lines = log_content.strip().split('\n')
+                        lines = content_for_analysis.strip().split('\n')
                         for line in lines:
                             line = line.strip().rstrip(',')
                             if line:
@@ -1637,7 +1691,7 @@ finally:
                 except json.JSONDecodeError as e:
                     self.logger.warning(f"⚠️ JSON parsing failed: {e}")
                     # Fallback to plain text analysis
-                    log_entries = [{"data": log_content, "stream_name": "stdout", "time": 0}]
+                    log_entries = [{"data": content_for_analysis, "stream_name": "stdout", "time": 0}]
                 
                 self.logger.info(f"📋 Parsed {len(log_entries)} log entries")
                 
