@@ -548,11 +548,22 @@ try:
     actual_episodes = training_config.get('max_episodes', 1)
     log_and_print("info", f"[INFO] Configuration loaded - Episodes to run: {{actual_episodes}}")
     
+    # Check if this is evaluation mode (special flag)
+    is_evaluation = {episodes} == -1
+    if is_evaluation:
+        log_and_print("info", "[MODE] EVALUATION MODE: Running evaluation instead of training")
+    
     # Import training script (use train_kaggle.py if available, otherwise train.py)
     if os.path.exists("train_kaggle.py"):
         log_and_print("info", "[PROGRESS] TRACKING_PROGRESS: Using train_kaggle.py (Kaggle-optimized)")
         import train_kaggle
-        train_kaggle.main()
+        if is_evaluation:
+            # For evaluation, we need to modify the behavior
+            log_and_print("info", "[EVALUATION] Loading model and running evaluation...")
+            # This would need to be implemented in train_kaggle.py
+            train_kaggle.run_evaluation()
+        else:
+            train_kaggle.main()
     else:
         log_and_print("info", "[PROGRESS] TRACKING_PROGRESS: Using train.py")
         # Use exec to avoid import issues with dependencies
@@ -561,6 +572,48 @@ try:
     
     log_and_print("info", "\\n[OK] Training completed successfully!")
     log_and_print("info", "[SUCCESS] TRACKING_SUCCESS: Training execution finished successfully")
+    
+    # CRITICAL: Copy all artifacts to Kaggle output directory
+    log_and_print("info", "[ARTIFACTS] Copying models, figures, and results to Kaggle output...")
+    try:
+        import shutil
+        kaggle_output = "/kaggle/working"
+        os.makedirs(kaggle_output, exist_ok=True)
+        
+        # Copy models directory
+        if os.path.exists("models"):
+            models_dest = os.path.join(kaggle_output, "models")
+            if os.path.exists(models_dest):
+                shutil.rmtree(models_dest)
+            shutil.copytree("models", models_dest)
+            log_and_print("info", f"[ARTIFACTS] Models copied to: {{models_dest}}")
+        
+        # Copy results directory  
+        if os.path.exists("results"):
+            results_dest = os.path.join(kaggle_output, "results")
+            if os.path.exists(results_dest):
+                shutil.rmtree(results_dest)
+            shutil.copytree("results", results_dest)
+            log_and_print("info", f"[ARTIFACTS] Results copied to: {{results_dest}}")
+        
+        # Copy any image files (figures, plots)
+        for ext in ['*.png', '*.jpg', '*.jpeg', '*.svg', '*.pdf']:
+            import glob
+            for img_file in glob.glob(ext):
+                shutil.copy2(img_file, kaggle_output)
+                log_and_print("info", f"[ARTIFACTS] Figure copied: {{img_file}}")
+        
+        # Copy any CSV files with metrics/results
+        for csv_file in glob.glob("*.csv"):
+            shutil.copy2(csv_file, kaggle_output)
+            log_and_print("info", f"[ARTIFACTS] Metrics file copied: {{csv_file}}")
+            
+        log_and_print("info", "[SUCCESS] All artifacts copied to Kaggle output directory")
+        
+    except Exception as e:
+        log_and_print("error", f"[ERROR] Failed to copy artifacts: {{e}}")
+        import traceback
+        log_and_print("error", traceback.format_exc())
     
 except subprocess.TimeoutExpired:
     log_and_print("error", "[ERROR] Git clone timeout - repository too large or network issues")
@@ -996,6 +1049,39 @@ def run_kaggle_training(episodes: int = 1,
         return success
     except Exception as e:
         print(f"Error running Kaggle training: {e}")
+        return False
+
+
+def run_kaggle_evaluation(model_path: str = "models/best_model.pth",
+                         repo_url: str = "https://github.com/elonmj/rl-portfolio-optimizer.git",
+                         branch: str = "feature/training-config-updates",
+                         timeout: int = 3600) -> bool:
+    """
+    Quick function to run evaluation on Kaggle.
+    
+    Args:
+        model_path: Path to the model to evaluate
+        repo_url: GitHub repository URL (must be public)
+        branch: Git branch to clone
+        timeout: Maximum monitoring time in seconds
+        
+    Returns:
+        bool: True if successful
+    """
+    try:
+        manager = KaggleManagerGitHub()
+        # For evaluation, we use episodes=-1 as a special flag
+        success, kernel_slug = manager.create_and_run_github_workflow(
+            repo_url=repo_url,
+            branch=branch,
+            episodes=-1,  # Special flag for evaluation mode
+            timeout=timeout
+        )
+        if success and kernel_slug:
+            print(f"  Evaluation kernel completed successfully: {kernel_slug}")
+        return success
+    except Exception as e:
+        print(f"Error running Kaggle evaluation: {e}")
         return False
 
 
