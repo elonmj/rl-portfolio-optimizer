@@ -30,6 +30,12 @@ plotly>=5.14.0
 scikit-learn>=1.3.0
 statsmodels>=0.14.0
 
+# Advanced Mathematical Framework for modelisation.pdf
+copulas>=0.9.0            # R-Vine copula modeling
+arch>=6.2.0              # ARMA-GARCH time series modeling
+TA-Lib>=0.4.28           # Enhanced technical indicators library
+pyvinecopulib>=0.6.4     # Alternative R-Vine copula implementation
+
 # Logging et monitoring
 tensorboard>=2.13.0
 wandb>=0.15.0

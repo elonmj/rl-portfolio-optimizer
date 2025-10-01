@@ -44,6 +44,42 @@ class Config:
     CVAR_LAMBDA = 0.5       # Poids CVaR dans reward
     CVAR_WINDOW = 52        # Fenêtre glissante 52 semaines
     
+    # === Paramètres Stock Picking (modelisation.pdf Section 2.1) ===
+    STOCK_PICKING_ENABLED = True       # Activer le module de sélection d'actions
+    STOCK_PICKING_WINDOW_W = 52        # Fenêtre d'analyse (52 semaines)
+    STOCK_PICKING_TOP_K = 10           # Nombre d'actifs à sélectionner
+    
+    # Poids des critères de sélection
+    STOCK_PICKING_W_MOMENTUM = 0.3     # Poids momentum (performance relative)
+    STOCK_PICKING_W_VOLATILITY = 0.25  # Poids volatilité (risque - négatif)
+    STOCK_PICKING_W_LIQUIDITY = 0.25   # Poids liquidité (volume)
+    STOCK_PICKING_W_DIVIDEND = 0.2     # Poids dividendes (rendement)
+    
+    # === Paramètres de modélisation stochastique du risque ===
+    STOCHASTIC_RISK_ENABLED = True
+    N_SIMULATION_SCENARIOS = 5000      # Nombre de scénarios Monte Carlo
+    RISK_MODEL_WINDOW = 252            # Fenêtre pour ajustement des modèles (1 an)
+    RISK_MODEL_UPDATE_FREQUENCY = 20   # Réajuster les modèles tous les N pas
+    
+    # === Paramètres de fonction de récompense multi-composants ===
+    # Poids des composants de récompense (Équations 9-12)
+    REWARD_ALPHA_CVAR = 1.0           # Poids pénalité CVaR
+    REWARD_ALPHA_DRAWDOWN = 0.5       # Poids pénalité drawdown
+    REWARD_ALPHA_ENTROPY = 0.1        # Poids bonus entropie
+    
+    # Paramètres supplémentaires
+    DRAWDOWN_WINDOW = 50              # Fenêtre pour calcul du drawdown
+    
+    # === Paramètres de rééquilibrage avec coûts de transaction ===
+    # Coûts de transaction (Équations 7-8)
+    TRANSACTION_COST_ENABLED = True   # Activer les coûts de transaction
+    LAMBDA_TX = 0.001                 # Coefficient frais de transaction (0.1%)
+    LAMBDA_SLIP = 0.0005              # Coefficient slippage (0.05%)
+    
+    # Mécaniques de rééquilibrage
+    USE_INTEGER_SHARES = True         # Utiliser conversion en nombre entier d'actions
+    MIN_TRADE_SIZE = 100.0            # Taille minimum de trade (éviter micro-trades)
+    
     # Paramètres des indicateurs techniques (21 au total)
     TECHNICAL_INDICATORS = [
         'SMA_5', 'SMA_10', 'SMA_20', 'SMA_50',      # Simple Moving Averages

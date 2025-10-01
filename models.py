@@ -1,6 +1,7 @@
 """
-Modèles de réseaux de neurones pour l'agent SAC avec mécanisme d'attention.
-Implémente ActorWithAttention et CriticWithAttention selon spec.md.
+Modèles de réseaux de neurones pour l'agent SAC simplifié.
+Implémente Actor et Critic sans mécanisme d'attention pour performances optimales.
+Version compatible avec modelisation.pdf Section 2.5.
 """
 
 import torch
@@ -12,599 +13,184 @@ import math
 
 from config import Config
 
-class PositionalEncoding(nn.Module):
-    """Encodage positionnel pour le mécanisme d'attention"""
-    
-    def __init__(self, d_model: int, max_len: int = 5000):
-        super().__init__()
-        
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * 
-                           (-math.log(10000.0) / d_model))
-        
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0)
-        
-        self.register_buffer('pe', pe)
-    
-    def forward(self, x):
-        return x + self.pe[:, :x.size(1)]
 
-
-class SelfAttentionModule(nn.Module):
-    """Module d'auto-attention pour analyser les relations entre assets"""
-    
-    def __init__(self, feature_dim: int, hidden_dim: int, num_heads: int = 8):
-        super().__init__()
-        
-        self.feature_dim = feature_dim
-        self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-        
-        # Projection des features vers la dimension cachée
-        self.input_projection = nn.Linear(feature_dim, hidden_dim)
-        
-        # Couche d'auto-attention multi-têtes
-        self.multi_head_attention = nn.MultiheadAttention(
-            embed_dim=hidden_dim,
-            num_heads=num_heads,
-            dropout=0.1,
-            batch_first=True
-        )
-        
-        # Normalisation et feed-forward
-        self.layer_norm1 = nn.LayerNorm(hidden_dim)
-        self.layer_norm2 = nn.LayerNorm(hidden_dim)
-        
-        self.feed_forward = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_dim * 2, hidden_dim)
-        )
-        
-        # Encodage positionnel
-        self.pos_encoding = PositionalEncoding(hidden_dim)
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass de l'attention.
-        Args:
-            x: Tensor de shape (batch_size, num_assets, feature_dim)
-        Returns:
-            Tensor de shape (batch_size, num_assets, hidden_dim)
-        """
-        batch_size, num_assets, _ = x.shape
-        
-        # Projection vers la dimension cachée
-        x = self.input_projection(x)
-        
-        # Ajouter l'encodage positionnel
-        x = self.pos_encoding(x)
-        
-        # Auto-attention
-        attn_output, attention_weights = self.multi_head_attention(x, x, x)
-        
-        # Connexion résiduelle + normalisation
-        x = self.layer_norm1(x + attn_output)
-        
-        # Feed-forward
-        ff_output = self.feed_forward(x)
-        
-        # Connexion résiduelle + normalisation
-        x = self.layer_norm2(x + ff_output)
-        
-        return x
-
-
-class ActorWithAttention(nn.Module):
+class SimpleActor(nn.Module):
     """
-    Réseau Actor avec mécanisme d'attention pour la politique SAC.
-    Produit une distribution de probabilité sur les allocations de portefeuille.
+    Réseau Actor simplifié pour SAC selon modelisation.pdf Section 2.5.
+    Architecture efficace sans attention pour performances optimales.
     """
     
     def __init__(self, 
-                 num_assets: int,
-                 feature_dim: int = Config.FEATURE_DIM,
-                 hidden_dim: int = Config.HIDDEN_DIM,
-                 attention_heads: int = Config.ATTENTION_HEADS):
+                 state_dim: int,
+                 action_dim: int,
+                 hidden_dim: int = 256):
         super().__init__()
         
-        self.num_assets = num_assets
-        self.feature_dim = feature_dim
-        self.hidden_dim = hidden_dim
+        self.state_dim = state_dim
+        self.action_dim = action_dim
         
-        # Module d'attention pour analyser les relations entre assets
-        self.attention = SelfAttentionModule(
-            feature_dim=feature_dim,
-            hidden_dim=hidden_dim,
-            num_heads=attention_heads
-        )
-        
-        # Agrégation des features d'attention
-        self.aggregation = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
+        # Réseau principal
+        self.network = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.1)
-        )
-        
-        # Traitement de l'état du portefeuille
-        portfolio_state_dim = num_assets + 1 + num_assets  # weights + cash + holdings
-        self.portfolio_encoder = nn.Sequential(
-            nn.Linear(portfolio_state_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(0.1)
-        )
-        
-        # Réseau de la politique
-        combined_dim = (hidden_dim // 2) * num_assets + hidden_dim // 2
-        self.policy_net = nn.Sequential(
-            nn.Linear(combined_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.2),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, num_assets * 2)  # Mean et log_std pour chaque asset
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
         )
         
-        # Limites pour log_std
+        # Têtes pour moyenne et log-variance
+        self.mean_head = nn.Linear(hidden_dim, action_dim)
+        self.log_std_head = nn.Linear(hidden_dim, action_dim)
+        
+        # Contraintes pour log_std
         self.log_std_min = -20
         self.log_std_max = 2
-        
+    
     def forward(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass de l'actor.
-        Args:
-            state: État complet incluant features et état du portefeuille
-        Returns:
-            mean, log_std des actions
+        Forward pass retournant moyenne et log-std pour chaque action
         """
-        batch_size = state.size(0)
+        features = self.network(state)
         
-        # Découper l'état
-        features_flat = state[:, :self.num_assets * self.feature_dim]
-        portfolio_state = state[:, self.num_assets * self.feature_dim:]
+        mean = self.mean_head(features)
+        log_std = self.log_std_head(features)
         
-        # Reshaper les features: (batch, num_assets, feature_dim)
-        features = features_flat.view(batch_size, self.num_assets, self.feature_dim)
-        
-        # Appliquer l'attention
-        attention_output = self.attention(features)  # (batch, num_assets, hidden_dim)
-        
-        # Agréger les features d'attention pour chaque asset
-        aggregated_features = self.aggregation(attention_output)  # (batch, num_assets, hidden_dim//2)
-        aggregated_features_flat = aggregated_features.view(batch_size, -1)
-        
-        # Encoder l'état du portefeuille
-        portfolio_encoded = self.portfolio_encoder(portfolio_state)  # (batch, hidden_dim//2)
-        
-        # Combiner les features d'attention et l'état du portefeuille
-        combined = torch.cat([aggregated_features_flat, portfolio_encoded], dim=1)
-        
-        # Passer par le réseau de politique
-        policy_output = self.policy_net(combined)
-        
-        # Séparer mean et log_std
-        mean = policy_output[:, :self.num_assets]
-        log_std = policy_output[:, self.num_assets:]
-        
-        # Contraindre log_std
+        # Contraindre log_std dans une plage raisonnable
         log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
         
         return mean, log_std
     
-    def sample(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def sample(self, state: torch.Tensor, deterministic: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Échantillonne une action à partir de la politique.
-        Returns:
-            action, log_prob, mean
+        Échantillonnage avec reparameterization trick (Équation 18)
         """
         mean, log_std = self.forward(state)
-        std = log_std.exp()
         
-        # Distribution normale
-        normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample()  # Reparameterization trick
+        if deterministic:
+            action = torch.tanh(mean)
+            log_prob = None
+        else:
+            std = log_std.exp()
+            
+            # Reparameterization trick
+            normal = torch.distributions.Normal(mean, std)
+            x_t = normal.rsample()  # rsample pour gradient
+            
+            # Transformation tanh (Équation 18)
+            action = torch.tanh(x_t)
+            
+            # Calcul log-probabilité avec correction Jacobienne
+            log_prob = normal.log_prob(x_t)
+            log_prob -= torch.log(1 - action.pow(2) + 1e-6)
+            log_prob = log_prob.sum(-1, keepdim=True)
         
-        # Appliquer tanh pour contraindre à [-1, 1]
-        action_raw = torch.tanh(x_t)
-        
-        # Calculer log_prob avec correction de Jacobien
-        log_prob = normal.log_prob(x_t)
-        log_prob -= torch.log(1 - action_raw.pow(2) + 1e-7)
-        log_prob = log_prob.sum(dim=1, keepdim=True)
-        
-        # Transformer vers [0, 1] et normaliser
-        action = (action_raw + 1) / 2  # [-1, 1] -> [0, 1]
-        action = F.softmax(action * 5, dim=1)  # Softmax avec température
-        
-        return action, log_prob, torch.tanh(mean)
+        return action, log_prob
 
 
-class ActorSimple(nn.Module):
+class SimpleCritic(nn.Module):
     """
-    Réseau Actor SIMPLIFIÉ sans mécanisme d'attention pour accélérer les calculs.
-    Produit une distribution de probabilité sur les allocations de portefeuille.
-    """
-    
-    def __init__(self, 
-                 num_assets: int,
-                 feature_dim: int = Config.FEATURE_DIM,
-                 hidden_dim: int = Config.HIDDEN_DIM):
-        super().__init__()
-        
-        self.num_assets = num_assets
-        self.feature_dim = feature_dim
-        self.hidden_dim = hidden_dim
-        
-        # Dimensions d'entrée
-        asset_features_dim = num_assets * feature_dim
-        portfolio_state_dim = num_assets + 1 + num_assets  # weights + cash + holdings
-        total_input_dim = asset_features_dim + portfolio_state_dim
-        
-        # Réseau simple sans attention
-        self.policy_net = nn.Sequential(
-            nn.Linear(total_input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, num_assets * 2)  # Mean et log_std pour chaque asset
-        )
-        
-        # Limites pour log_std
-        self.log_std_min = -20
-        self.log_std_max = 2
-        
-    def forward(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass simplifié de l'actor."""
-        # Passer directement l'état complet dans le réseau
-        policy_output = self.policy_net(state)
-        
-        # Séparer mean et log_std
-        mean = policy_output[:, :self.num_assets]
-        log_std = policy_output[:, self.num_assets:]
-        
-        # Contraindre log_std
-        log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
-        
-        return mean, log_std
-    
-    def sample(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Échantillonne une action à partir de la politique."""
-        mean, log_std = self.forward(state)
-        std = log_std.exp()
-        
-        # Distribution normale
-        normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample()  # Reparameterization trick
-        
-        # Appliquer tanh pour contraindre à [-1, 1]
-        action_raw = torch.tanh(x_t)
-        
-        # Calculer log_prob avec correction de Jacobien
-        log_prob = normal.log_prob(x_t)
-        log_prob -= torch.log(1 - action_raw.pow(2) + 1e-7)
-        log_prob = log_prob.sum(dim=1, keepdim=True)
-        
-        # Transformer vers [0, 1] et normaliser
-        action = (action_raw + 1) / 2  # [-1, 1] -> [0, 1]
-        action = F.softmax(action * 5, dim=1)  # Softmax avec température
-        
-        return action, log_prob, torch.tanh(mean)
-
-
-class CriticSimple(nn.Module):
-    """
-    Réseau Critic SIMPLIFIÉ sans mécanisme d'attention pour accélérer les calculs.
-    Évalue la valeur état-action.
+    Réseau Critic simplifié pour SAC selon modelisation.pdf Section 2.5.
+    Implémente Q(s,a) avec architecture efficace.
     """
     
     def __init__(self, 
-                 num_assets: int,
-                 feature_dim: int = Config.FEATURE_DIM,
-                 hidden_dim: int = Config.HIDDEN_DIM):
+                 state_dim: int, 
+                 action_dim: int, 
+                 hidden_dim: int = 256):
         super().__init__()
-        
-        self.num_assets = num_assets
-        self.feature_dim = feature_dim
-        self.hidden_dim = hidden_dim
-        
-        # Dimensions d'entrée
-        asset_features_dim = num_assets * feature_dim
-        portfolio_state_dim = num_assets + 1 + num_assets  # weights + cash + holdings
-        action_dim = num_assets
-        total_input_dim = asset_features_dim + portfolio_state_dim + action_dim
-        
-        # Réseau Q-value simplifié
-        self.q_net = nn.Sequential(
-            nn.Linear(total_input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1)
-        )
-        
-    def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        """Forward pass simplifié du critic."""
-        # Concaténer état et action
-        combined = torch.cat([state, action], dim=1)
-        
-        # Calculer la Q-value
-        q_value = self.q_net(combined)
-        
-        return q_value
-
-
-class CriticWithAttention(nn.Module):
-    """
-    Réseau Critic avec mécanisme d'attention pour les Q-values SAC.
-    Évalue la valeur état-action.
-    """
-    
-    def __init__(self, 
-                 num_assets: int,
-                 feature_dim: int = Config.FEATURE_DIM,
-                 hidden_dim: int = Config.HIDDEN_DIM,
-                 attention_heads: int = Config.ATTENTION_HEADS):
-        super().__init__()
-        
-        self.num_assets = num_assets
-        self.feature_dim = feature_dim
-        self.hidden_dim = hidden_dim
-        
-        # Module d'attention pour analyser les relations entre assets
-        self.attention = SelfAttentionModule(
-            feature_dim=feature_dim,
-            hidden_dim=hidden_dim,
-            num_heads=attention_heads
-        )
-        
-        # Agrégation des features d'attention
-        self.features_aggregation = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(0.1)
-        )
-        
-        # Traitement de l'état du portefeuille
-        portfolio_state_dim = num_assets + 1 + num_assets  # weights + cash + holdings
-        self.portfolio_encoder = nn.Sequential(
-            nn.Linear(portfolio_state_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(0.1)
-        )
-        
-        # Traitement des actions
-        self.action_encoder = nn.Sequential(
-            nn.Linear(num_assets, hidden_dim // 4),
-            nn.ReLU(),
-            nn.Dropout(0.1)
-        )
         
         # Réseau Q-value
-        combined_dim = (hidden_dim // 2) * num_assets + hidden_dim // 2 + hidden_dim // 4
-        self.q_net = nn.Sequential(
-            nn.Linear(combined_dim, hidden_dim),
+        self.network = nn.Sequential(
+            nn.Linear(state_dim + action_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(), 
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1)
+            nn.Linear(hidden_dim, 1)
         )
-        
+    
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass du critic.
-        Args:
-            state: État complet
-            action: Action (allocation de portefeuille)
-        Returns:
-            Q-value
+        Forward pass Q(s,a)
         """
-        batch_size = state.size(0)
-        
-        # Découper l'état
-        features_flat = state[:, :self.num_assets * self.feature_dim]
-        portfolio_state = state[:, self.num_assets * self.feature_dim:]
-        
-        # Reshaper les features: (batch, num_assets, feature_dim)
-        features = features_flat.view(batch_size, self.num_assets, self.feature_dim)
-        
-        # Appliquer l'attention
-        attention_output = self.attention(features)  # (batch, num_assets, hidden_dim)
-        
-        # Agréger les features d'attention
-        aggregated_features = self.features_aggregation(attention_output)
-        aggregated_features_flat = aggregated_features.view(batch_size, -1)
-        
-        # Encoder l'état du portefeuille
-        portfolio_encoded = self.portfolio_encoder(portfolio_state)
-        
-        # Encoder l'action
-        action_encoded = self.action_encoder(action)
-        
-        # Combiner tous les éléments
-        combined = torch.cat([aggregated_features_flat, portfolio_encoded, action_encoded], dim=1)
-        
-        # Calculer la Q-value
-        q_value = self.q_net(combined)
-        
-        return q_value
-
-from config import Config
-
-class SACModels:
-    """Conteneur pour tous les modèles SAC avec option attention/simple"""
-    
-    def __init__(self, num_assets: int, device: torch.device = None):
-        if device is None:
-            device = Config.init_device()
-        self.num_assets = num_assets
-        self.device = device
-        self.use_attention = Config.USE_ATTENTION
-        
-        # Créer les modèles selon l'option attention
-        if self.use_attention:
-            print("🧠 Utilisation des modèles AVEC mécanisme d'attention")
-            self.actor = ActorWithAttention(num_assets).to(device)
-            self.critic1 = CriticWithAttention(num_assets).to(device)
-            self.critic2 = CriticWithAttention(num_assets).to(device)
-            
-            # Créer les targets (copies des critics)
-            self.critic1_target = CriticWithAttention(num_assets).to(device)
-            self.critic2_target = CriticWithAttention(num_assets).to(device)
-        else:
-            print("⚡ Utilisation des modèles SIMPLES (sans attention) - ACCÉLÉRATION")
-            self.actor = ActorSimple(num_assets).to(device)
-            self.critic1 = CriticSimple(num_assets).to(device)
-            self.critic2 = CriticSimple(num_assets).to(device)
-            
-            # Créer les targets (copies des critics)
-            self.critic1_target = CriticSimple(num_assets).to(device)
-            self.critic2_target = CriticSimple(num_assets).to(device)
-        
-        # Initialiser les targets avec les mêmes poids
-        self.critic1_target.load_state_dict(self.critic1.state_dict())
-        self.critic2_target.load_state_dict(self.critic2.state_dict())
-        
-        # Geler les paramètres des targets
-        for param in self.critic1_target.parameters():
-            param.requires_grad = False
-        for param in self.critic2_target.parameters():
-            param.requires_grad = False
-        
-        # Paramètre d'entropie (apprenable)
-        self.log_alpha = torch.tensor(
-            np.log(Config.INITIAL_ALPHA), 
-            dtype=torch.float32, 
-            device=device, 
-            requires_grad=True
-        )
-
-        
-        print(f"  Modèles SAC initialisés avec {num_assets} assets")
-        print(f"   Mode: {'Attention' if self.use_attention else 'Simple (Accéléré)'}")
-        print(f"   Actor parameters: {sum(p.numel() for p in self.actor.parameters()):,}")
-        print(f"   Critic parameters: {sum(p.numel() for p in self.critic1.parameters()):,}")
-        
-        # Afficher la réduction de paramètres en mode simple
-        if not self.use_attention:
-            print(f"   ⚡ Mode accéléré activé - Calculs simplifiés sans attention")
-    
-    @property
-    def alpha(self):
-        """Coefficient d'entropie"""
-        return self.log_alpha.exp()
-    
-    def soft_update_targets(self, tau: float = Config.TAU):
-        """Mise à jour douce des réseaux targets"""
-        for target_param, param in zip(self.critic1_target.parameters(), 
-                                     self.critic1.parameters()):
-            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-        
-        for target_param, param in zip(self.critic2_target.parameters(), 
-                                     self.critic2.parameters()):
-            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-    
-    def save_models(self, path: str):
-        """Sauvegarde tous les modèles"""
-        torch.save({
-            'actor': self.actor.state_dict(),
-            'critic1': self.critic1.state_dict(),
-            'critic2': self.critic2.state_dict(),
-            'critic1_target': self.critic1_target.state_dict(),
-            'critic2_target': self.critic2_target.state_dict(),
-            'log_alpha': self.log_alpha,
-        }, path)
-        print(f"  Modèles sauvegardés dans {path}")
-    
-    def load_models(self, path: str):
-        """Charge tous les modèles"""
-        checkpoint = torch.load(path, map_location=self.device)
-        
-        self.actor.load_state_dict(checkpoint['actor'])
-        self.critic1.load_state_dict(checkpoint['critic1'])
-        self.critic2.load_state_dict(checkpoint['critic2'])
-        self.critic1_target.load_state_dict(checkpoint['critic1_target'])
-        self.critic2_target.load_state_dict(checkpoint['critic2_target'])
-        self.log_alpha = checkpoint['log_alpha']
-        
-        print(f"  Modèles chargés depuis {path}")
+        x = torch.cat([state, action], dim=1)
+        return self.network(x)
 
 
-def test_models():
-    """Test des modèles avec attention"""
-    print("🧪 Test des modèles SAC avec attention...")
+# Alias pour compatibilité avec le code existant
+class ActorWithAttention(SimpleActor):
+    """
+    Wrapper de compatibilité - utilise maintenant SimpleActor sans attention
+    Remplace l'ancienne implémentation complexe avec attention
+    """
     
-    # Paramètres de test
-    batch_size = 4
-    num_assets = 8
-    feature_dim = Config.FEATURE_DIM  # 21
-    
-    # Calcul de la dimension d'observation
-    obs_dim = num_assets * feature_dim + num_assets + 1 + num_assets
-    
-    # Créer des données de test
-    state = torch.randn(batch_size, obs_dim)
-    action = torch.rand(batch_size, num_assets)
-    action = F.softmax(action, dim=1)  # Normaliser les actions
-    
-    print(f"State shape: {state.shape}")
-    print(f"Action shape: {action.shape}")
-    
-    # Tester les modèles
-    models = SACModels(num_assets)
-    
-    # Test Actor
-    print("\n🎭 Test Actor:")
-    mean, log_std = models.actor(state)
-    print(f"  Mean shape: {mean.shape}")
-    print(f"  Log_std shape: {log_std.shape}")
-    
-    # Test sampling
-    sampled_action, log_prob, _ = models.actor.sample(state)
-    print(f"  Sampled action shape: {sampled_action.shape}")
-    print(f"  Log prob shape: {log_prob.shape}")
-    print(f"  Action sum: {sampled_action.sum(dim=1)}")  # Doit être ~1
-    
-    # Test Critics
-    print("\n  Test Critics:")
-    q1 = models.critic1(state, action)
-    q2 = models.critic2(state, action)
-    print(f"  Q1 shape: {q1.shape}")
-    print(f"  Q2 shape: {q2.shape}")
-    
-    # Test targets
-    with torch.no_grad():
-        q1_target = models.critic1_target(state, action)
-        q2_target = models.critic2_target(state, action)
-        print(f"  Q1 target shape: {q1_target.shape}")
-        print(f"  Q2 target shape: {q2_target.shape}")
-    
-    # Test soft update
-    print("\n🔄 Test soft update:")
-    old_param = models.critic1_target.q_net[0].weight.clone()
-    models.soft_update_targets(tau=0.1)
-    new_param = models.critic1_target.q_net[0].weight
-    param_changed = not torch.equal(old_param, new_param)
-    print(f"  Parameters changed: {param_changed}")
-    
-    print("\n  Test des modèles terminé avec succès!")
+    def __init__(self, 
+                 num_assets: int,
+                 feature_dim: int = Config.FEATURE_DIM,
+                 hidden_dim: int = Config.HIDDEN_DIM,
+                 attention_heads: int = Config.ATTENTION_HEADS):
+        
+        # Calculer la dimension d'état selon l'espace d'état amélioré
+        state_dim = 339  # Dimension de l'espace d'état amélioré
+        action_dim = num_assets
+        
+        super().__init__(state_dim, action_dim, hidden_dim)
+        
+        print(f"📊 SAC Actor simplifié initialisé: {state_dim}→{action_dim} (sans attention)")
 
 
-if __name__ == "__main__":
-    test_models()
+class CriticWithAttention(SimpleCritic):
+    """
+    Wrapper de compatibilité - utilise maintenant SimpleCritic sans attention
+    Remplace l'ancienne implémentation complexe avec attention
+    """
+    
+    def __init__(self, 
+                 num_assets: int,
+                 feature_dim: int = Config.FEATURE_DIM,
+                 hidden_dim: int = Config.HIDDEN_DIM,
+                 attention_heads: int = Config.ATTENTION_HEADS):
+        
+        # Calculer les dimensions
+        state_dim = 339  # Dimension de l'espace d'état amélioré
+        action_dim = num_assets
+        
+        super().__init__(state_dim, action_dim, hidden_dim)
+        
+        print(f"📊 SAC Critic simplifié initialisé: {state_dim}+{action_dim}→1 (sans attention)")
+
+
+# Fonction utilitaire pour créer les modèles
+def create_sac_models(num_assets: int, device: torch.device = None):
+    """
+    Crée les modèles SAC simplifiés pour l'entraînement
+    """
+    device = device or torch.device('cpu')
+    
+    # Actor
+    actor = ActorWithAttention(num_assets=num_assets)
+    actor.to(device)
+    
+    # Critics (double critic pour stabilité)
+    critic1 = CriticWithAttention(num_assets=num_assets) 
+    critic2 = CriticWithAttention(num_assets=num_assets)
+    critic1.to(device)
+    critic2.to(device)
+    
+    # Target critics
+    target_critic1 = CriticWithAttention(num_assets=num_assets)
+    target_critic2 = CriticWithAttention(num_assets=num_assets)
+    target_critic1.load_state_dict(critic1.state_dict())
+    target_critic2.load_state_dict(critic2.state_dict())
+    target_critic1.to(device)
+    target_critic2.to(device)
+    
+    return {
+        'actor': actor,
+        'critic1': critic1,
+        'critic2': critic2, 
+        'target_critic1': target_critic1,
+        'target_critic2': target_critic2
+    }

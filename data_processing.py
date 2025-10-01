@@ -363,5 +363,244 @@ def test_data_processing():
     print("  Test terminé avec succès!")
 
 
+class StockPickingProcessor:
+    """
+    Module de sélection d'actions avec critères multiples selon modelisation.pdf Section 2.1
+    Implémente l'algorithme de sélection des top-K actifs basé sur:
+    - Momentum (performance relative)
+    - Volatilité (risque)
+    - Liquidité (volume moyen)
+    - Dividendes (rendement)
+    """
+    
+    def __init__(self, data_handler: DataHandler):
+        self.data_handler = data_handler
+        
+        # Poids des critères selon modelisation.pdf
+        self.w_momentum = 0.3      # Poids momentum
+        self.w_volatility = 0.25   # Poids volatilité (négatif dans le score)
+        self.w_liquidity = 0.25    # Poids liquidité
+        self.w_dividend = 0.2      # Poids dividendes
+        
+        # Paramètres de la fenêtre de calcul
+        self.window_W = 52         # Fenêtre de 52 semaines (1 an)
+        
+    def select_top_k_assets(self, 
+                          universe: List[str], 
+                          date_t: str, 
+                          k: int = 10,
+                          min_history: int = 52) -> List[str]:
+        """
+        Sélectionne les top-K actifs selon l'algorithme de modelisation.pdf
+        
+        Args:
+            universe: Liste des tickers disponibles
+            date_t: Date de sélection
+            k: Nombre d'actifs à sélectionner
+            min_history: Nombre minimum d'observations requises
+            
+        Returns:
+            Liste des K meilleurs actifs sélectionnés
+        """
+        
+        date_end = pd.to_datetime(date_t)
+        date_start = date_end - pd.Timedelta(weeks=self.window_W + 4)  # Marge de sécurité
+        
+        scores = {}
+        
+        for ticker in universe:
+            try:
+                # Récupérer les données historiques
+                df = self.data_handler.get_ticker_data(
+                    ticker, 
+                    date_start.strftime('%Y-%m-%d'), 
+                    date_end.strftime('%Y-%m-%d')
+                )
+                
+                if len(df) < min_history:
+                    continue
+                    
+                # Calculer les métriques selon modelisation.pdf
+                momentum = self._calculate_momentum(df)
+                volatility = self._calculate_volatility(df)
+                liquidity = self._calculate_liquidity(df)
+                dividend_yield = self._calculate_dividend_yield(ticker, date_t)
+                
+                # Vérifier que toutes les métriques sont valides
+                if all(not np.isnan(x) for x in [momentum, volatility, liquidity, dividend_yield]):
+                    scores[ticker] = {
+                        'momentum': momentum,
+                        'volatility': volatility,
+                        'liquidity': liquidity,
+                        'dividend': dividend_yield
+                    }
+                    
+            except Exception as e:
+                print(f"⚠️ Erreur pour {ticker}: {e}")
+                continue
+        
+        if len(scores) < k:
+            print(f"⚠️ Seulement {len(scores)} actifs valides trouvés pour {k} demandés")
+            k = len(scores)
+        
+        # Calculer les rangs et le score composite
+        ranked_scores = self._calculate_composite_scores(scores)
+        
+        # Sélectionner les top-K
+        top_k = sorted(ranked_scores.items(), key=lambda x: x[1], reverse=True)[:k]
+        selected_assets = [asset for asset, score in top_k]
+        
+        print(f"📊 Sélection d'actifs pour {date_t}:")
+        print(f"  Top-{k} actifs: {selected_assets}")
+        
+        return selected_assets
+    
+    def _calculate_momentum(self, df: pd.DataFrame) -> float:
+        """
+        Calcule le momentum selon l'Équation: momentum_i = P[i][t-1] / P[i][t-W-1]
+        """
+        if len(df) < self.window_W + 2:
+            return np.nan
+            
+        # Prix à t-1 (dernière observation)
+        price_t_minus_1 = df['Close'].iloc[-1]
+        
+        # Prix à t-W-1 (W semaines avant)
+        if len(df) >= self.window_W + 1:
+            price_t_minus_W_minus_1 = df['Close'].iloc[-(self.window_W + 1)]
+        else:
+            price_t_minus_W_minus_1 = df['Close'].iloc[0]
+        
+        if price_t_minus_W_minus_1 <= 0:
+            return np.nan
+            
+        momentum = price_t_minus_1 / price_t_minus_W_minus_1
+        return momentum
+    
+    def _calculate_volatility(self, df: pd.DataFrame) -> float:
+        """
+        Calcule la volatilité comme écart-type des rendements quotidiens
+        """
+        if len(df) < 2:
+            return np.nan
+            
+        # Calculer les rendements quotidiens
+        returns = df['Close'].pct_change().dropna()
+        
+        if len(returns) < self.window_W // 4:  # Au moins ~13 observations
+            return np.nan
+            
+        # Volatilité annualisée (assume 252 jours de trading par an)
+        daily_volatility = returns.std()
+        annualized_volatility = daily_volatility * np.sqrt(252)
+        
+        return annualized_volatility
+    
+    def _calculate_liquidity(self, df: pd.DataFrame) -> float:
+        """
+        Calcule la liquidité comme volume moyen sur la fenêtre
+        """
+        if len(df) < self.window_W // 4:
+            return np.nan
+            
+        # Volume moyen sur la période
+        mean_volume = df['Volume'].mean()
+        
+        # Normaliser par la médiane pour éviter les valeurs extrêmes
+        median_volume = df['Volume'].median()
+        if median_volume > 0:
+            normalized_liquidity = mean_volume / median_volume
+        else:
+            normalized_liquidity = mean_volume
+            
+        return normalized_liquidity
+    
+    def _calculate_dividend_yield(self, ticker: str, date_t: str) -> float:
+        """
+        Calcule le rendement en dividendes: dividend[i][t-1] / P[i][t-1]
+        """
+        try:
+            if self.data_handler.dividends_data is None:
+                return 0.0
+                
+            # Récupérer le dividende le plus récent
+            if ticker in self.data_handler.dividends_data.columns:
+                dividend_series = pd.to_numeric(
+                    self.data_handler.dividends_data[ticker], 
+                    errors='coerce'
+                )
+                
+                # Prendre le dividende moyen des dernières années
+                recent_dividend = dividend_series.mean()
+                if np.isnan(recent_dividend):
+                    return 0.0
+                    
+                # Récupérer le prix actuel
+                df = self.data_handler.get_ticker_data(ticker)
+                if len(df) == 0:
+                    return 0.0
+                    
+                current_price = df['Close'].iloc[-1]
+                if current_price <= 0:
+                    return 0.0
+                    
+                dividend_yield = recent_dividend / current_price
+                return max(0.0, dividend_yield)  # Assurer que le yield est positif
+                
+        except Exception as e:
+            print(f"⚠️ Erreur dividende pour {ticker}: {e}")
+            
+        return 0.0
+    
+    def _calculate_composite_scores(self, scores: Dict) -> Dict[str, float]:
+        """
+        Calcule le score composite selon modelisation.pdf:
+        score_i = w_mu * Rank(momentum_i) - w_sigma * Rank(volatility_i) + 
+                  w_L * Rank(liquidity_i) + w_D * Rank(dividend_i)
+        """
+        
+        if not scores:
+            return {}
+        
+        # Extraire les métriques pour chaque actif
+        tickers = list(scores.keys())
+        momentums = [scores[t]['momentum'] for t in tickers]
+        volatilities = [scores[t]['volatility'] for t in tickers]
+        liquidities = [scores[t]['liquidity'] for t in tickers]
+        dividends = [scores[t]['dividend'] for t in tickers]
+        
+        # Calculer les rangs (1 = meilleur, len(tickers) = pire)
+        # Pour momentum, liquidité, dividendes: plus élevé = meilleur rang
+        # Pour volatilité: plus faible = meilleur rang
+        
+        def calculate_ranks(values, ascending=False):
+            """Calcule les rangs (1 = meilleur)"""
+            indexed_values = [(i, v) for i, v in enumerate(values)]
+            indexed_values.sort(key=lambda x: x[1], reverse=not ascending)
+            
+            ranks = [0] * len(values)
+            for rank, (original_index, _) in enumerate(indexed_values):
+                ranks[original_index] = rank + 1  # Rang commence à 1
+            
+            return ranks
+        
+        momentum_ranks = calculate_ranks(momentums, ascending=False)  # Plus haut = meilleur
+        volatility_ranks = calculate_ranks(volatilities, ascending=True)   # Plus bas = meilleur  
+        liquidity_ranks = calculate_ranks(liquidities, ascending=False)  # Plus haut = meilleur
+        dividend_ranks = calculate_ranks(dividends, ascending=False)    # Plus haut = meilleur
+        
+        # Calculer le score composite
+        composite_scores = {}
+        for i, ticker in enumerate(tickers):
+            score = (self.w_momentum * momentum_ranks[i] -
+                    self.w_volatility * volatility_ranks[i] +  # Soustraction car volatilité élevée = mauvais
+                    self.w_liquidity * liquidity_ranks[i] +
+                    self.w_dividend * dividend_ranks[i])
+            
+            composite_scores[ticker] = score
+            
+        return composite_scores
+
+
 if __name__ == "__main__":
     test_data_processing()
