@@ -1,7 +1,0 @@
-2025-10-02 19:08:41,254 - kaggle_manager_github - INFO -   Authenticated with Kaggle API
-2025-10-02 19:08:41,254 - kaggle_manager_github - INFO - 🚀 Starting Complete GitHub-based Kaggle Workflow
-2025-10-02 19:08:41,254 - kaggle_manager_github - INFO - 📂 Repository: https://github.com/elonmj/rl-portfolio-optimizer.git
-2025-10-02 19:08:41,254 - kaggle_manager_github - INFO - 🌿 Branch: feature/training-config-updates
-2025-10-02 19:08:41,254 - kaggle_manager_github - INFO -   Episodes: -1
-2025-10-02 19:08:41,257 - kaggle_manager_github - INFO - 🔄 Step 1: Ensuring Git repository is up to date...
-2025-10-02 19:08:41,257 - kaggle_manager_github - INFO - 🔍 Checking Git status and ensuring changes are pushed...
