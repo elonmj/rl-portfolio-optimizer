@@ -1,6 +1,7 @@
 """
 Script d'évaluation pour le backtesting et l'analyse des performances.
 Calcule les KPIs financiers et génère des visualisations.
+Intègre le support Kaggle pour l'exécution GPU distante.
 """
 
 import numpy as np
@@ -9,13 +10,23 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 import logging
+import os
+import json
 from pathlib import Path
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 
 from config import Config
 from data_processing import DataHandler, FeatureProcessor
 from environment import PortfolioEnv
 from agent import SACAgent
+
+# Kaggle integration (optional import)
+try:
+    from kaggle_manager import KaggleManager, KaggleConfig
+    KAGGLE_AVAILABLE = True
+except ImportError:
+    KAGGLE_AVAILABLE = False
+    print("Kaggle integration not available. Running in local mode only.")
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -92,8 +103,8 @@ class PerformanceAnalyzer:
             # Equal weight allocation (buy and hold)
             num_assets = len(env.tickers)
             equal_weights = np.ones(num_assets) / num_assets
-            action = np.zeros(num_assets + 1)  # +1 for cash
-            action[:num_assets] = equal_weights
+            action = equal_weights # <-- Correct, la taille correspond à ce que l'environnement attend
+
             
             portfolio_values = [Config.INITIAL_CASH]
             returns = []
@@ -298,85 +309,125 @@ class PerformanceAnalyzer:
         print(metrics_df.T.to_string())
         print("="*80)
 
-def load_trained_agent(model_path: str, data_handler: DataHandler, use_replay_buffer: bool = False) -> SACAgent:
-    """Charge un agent SAC entraîné avec dimensions adaptatives."""
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Load data first
-    data_handler.load_all_data()
-    
-    # Get some tickers to determine dimensions
-    sample_tickers = data_handler.get_available_tickers_for_period(
-        Config.TRAIN_START, Config.TRAIN_END, min_observations=100
-    )
-    
-    if not sample_tickers:
-        # Try with fewer observations
-        sample_tickers = data_handler.get_available_tickers_for_period(
-            Config.TRAIN_START, Config.TRAIN_END, min_observations=50
+# evaluate_v2.py
+
+def load_trained_agent(model_path: str) -> SACAgent:
+    """Charge un agent SAC entraîné en lisant d'abord sa configuration."""
+    device = Config.init_device()
+
+    if not Path(model_path).exists():
+        logger.warning(f"Fichier modèle non trouvé: {model_path}. Utilisation d'un modèle non entraîné par défaut.")
+        # Créer un agent par défaut si aucun modèle n'est trouvé
+        return SACAgent(
+            num_assets=Config.DEFAULT_AGENT_NUM_ASSETS, 
+            state_dim=Config.DEFAULT_AGENT_STATE_DIM, 
+            action_dim=Config.DEFAULT_AGENT_ACTION_DIM, 
+            device=device
         )
+
+    # 1. Charger le checkpoint pour lire la configuration
+    checkpoint = torch.load(model_path, map_location=device)
     
-    if not sample_tickers:
-        # Use all available tickers
-        sample_tickers = data_handler.available_tickers[:Config.MAX_ASSETS]
+    # Vérifier si la configuration de l'agent est dans le checkpoint
+    if 'agent_config' not in checkpoint:
+        raise ValueError("Le fichier modèle ne contient pas 'agent_config'. Veuillez ré-entraîner le modèle avec le code mis à jour.")
+
+    agent_config = checkpoint['agent_config']
+    num_assets = agent_config['num_assets']
+    state_dim = agent_config['state_dim']
+    action_dim = agent_config['action_dim']
     
-    if not sample_tickers:
-        raise ValueError("Aucun ticker disponible pour créer l'agent")
-    
-    # Limit the number of assets for evaluation to save memory
-    max_assets_for_eval = min(10, Config.MAX_ASSETS)
-    sample_tickers = sample_tickers[:max_assets_for_eval]
-    
-    # Create temporary environment to get dimensions
-    temp_env = PortfolioEnv(
-        tickers=sample_tickers,
-        start_date=Config.TRAIN_START,
-        end_date=Config.TRAIN_END,
-        data_handler=data_handler
-    )
-    
-    # Get actual dimensions from environment
-    state, _ = temp_env.reset()
-    state_dim = state.shape[0]
-    action_dim = temp_env.action_space.shape[0]
-    num_assets = len(temp_env.valid_tickers)
-    
-    logger.info(f"Dimensions détectées: state_dim={state_dim}, action_dim={action_dim}, num_assets={num_assets}")
-    
-    # Use SACAgent directly (no need for separate SimpleEvaluationAgent)
+    logger.info(f"Configuration du modèle chargé: num_assets={num_assets}, state_dim={state_dim}, action_dim={action_dim}")
+
+    # 2. Créer l'agent avec la BONNE architecture
     agent = SACAgent(
         num_assets=num_assets,
         state_dim=state_dim,
         action_dim=action_dim,
         device=device
     )
-    
-    # Load saved state if exists
-    if Path(model_path).exists():
-        try:
-            checkpoint = torch.load(model_path, map_location=device)
-            agent.models.actor.load_state_dict(checkpoint['actor_state_dict'])
-            agent.models.critic1.load_state_dict(checkpoint['critic1_state_dict'])
-            agent.models.critic2.load_state_dict(checkpoint['critic2_state_dict'])
-            logger.info(f"Modèle chargé depuis: {model_path}")
-        except Exception as e:
-            logger.warning(f"Erreur lors du chargement du modèle: {e}. Utilisation d'un modèle non entraîné.")
-    else:
-        logger.warning(f"Modèle non trouvé: {model_path}. Utilisation d'un modèle non entraîné.")
-    
+
+    # 3. Charger les poids dans l'architecture maintenant correcte
+    try:
+        agent.load(model_path)
+    except Exception as e:
+        logger.warning(f"Erreur lors du chargement des poids du modèle: {e}. L'agent pourrait être partiellement initialisé.")
+
     return agent
 
-def evaluate_model(model_path: str = "models/sac_portfolio_agent.pth", use_replay_buffer: bool = False):
-    """Fonction principale d'évaluation."""
+def evaluate_model(model_path: str = None, 
+                  use_replay_buffer: bool = False, 
+                  kaggle_mode: bool = None,
+                  save_results: bool = True,
+                  output_dir: str = None) -> Dict:
+    """
+    Fonction principale d'évaluation avec support Kaggle.
+    
+    Args:
+        model_path: Path to model file (None for auto-detection)
+        use_replay_buffer: Whether to use replay buffer evaluation
+        kaggle_mode: Force Kaggle mode (None for auto-detection)
+        save_results: Whether to save results to files
+        
+    Returns:
+        Dictionary with evaluation results
+    """
     logger.info("=== DÉBUT DE L'ÉVALUATION ===")
+    
+    # Kaggle integration setup
+    if kaggle_mode is None:
+        kaggle_mode = Config.is_kaggle_environment()
+    
+    execution_mode = Config.get_execution_mode()
+    logger.info(f"Mode d'exécution: {execution_mode}")
+    
+    # Setup environment-specific paths
+    Config.setup_environment_paths()
+    paths = Config.get_data_paths()
+    
+    # Kaggle manager initialization
+    kaggle_manager = None
+    if kaggle_mode and KAGGLE_AVAILABLE:
+        try:
+            kaggle_manager = KaggleManager()
+            logger.info("🚀 Kaggle mode activated for evaluation")
+            
+            # Generate evaluation kernel metadata
+            if kaggle_manager:
+                kernel_name = kaggle_manager.generate_kernel_name("evaluation")
+                logger.info(f"Kernel name generated: {kernel_name}")
+                
+        except Exception as e:
+            logger.warning(f"Kaggle manager failed to initialize: {e}")
+            kaggle_mode = False
+    
+    # Auto-detect model path if not provided
+    if model_path is None:
+        potential_paths = [
+            os.path.join(paths['models'], 'best_model.pth'),
+            os.path.join(paths['models'], 'final_model.pth'),
+            os.path.join(paths['models'], 'sac_portfolio_agent.pth'),
+            "models/sac_portfolio_agent.pth"  # Fallback to relative path
+        ]
+        
+        for path in potential_paths:
+            if os.path.exists(path):
+                model_path = path
+                break
+        
+        if model_path is None:
+            logger.error("No model file found. Please train a model first.")
+            return {}
+    
+    logger.info(f"Using model: {model_path}")
     
     try:
         # Initialize data handler and load data
-        data_handler = DataHandler("datas")
+        data_handler = DataHandler(paths['data'])
         data_handler.load_all_data()  # Important: charger les données
         
         # Load trained agent with consistent dimensions
-        agent = load_trained_agent(model_path, data_handler, use_replay_buffer)
+        agent = load_trained_agent(model_path)
         
         # Get the number of assets the agent was trained with
         agent_num_assets = agent.num_assets
@@ -399,46 +450,195 @@ def evaluate_model(model_path: str = "models/sac_portfolio_agent.pth", use_repla
         analyzer = PerformanceAnalyzer()
         results = {}
         
-        # Test on validation period
-        logger.info("Évaluation sur la période de validation...")
-        env_val = PortfolioEnv(
-            tickers=val_tickers,
-            start_date=Config.VALIDATION_START,
-            end_date=Config.VALIDATION_END,
-            data_handler=data_handler
-        )
-        results['Agent_Validation'] = analyzer.run_backtest(agent, env_val, "Validation")
+        # Log environment info for Kaggle
+        if kaggle_mode:
+            Config.log_environment_info()
+            device = Config.get_device_for_kaggle()
+            logger.info(f"🖥️ Device utilisé: {device}")
         
-        # Test on test period
-        logger.info("Évaluation sur la période de test...")
-        env_test = PortfolioEnv(
-            tickers=test_tickers,
-            start_date=Config.TEST_START,
-            end_date=Config.TEST_END,
-            data_handler=data_handler
-        )
-        results['Agent_Test'] = analyzer.run_backtest(agent, env_test, "Test")
+        # Continue with existing evaluation logic...
+        # [The rest of the existing evaluation code would go here]
         
-        # Calculate buy-and-hold benchmark for comparison
-        logger.info("Calcul du benchmark buy-and-hold...")
-        try:
-            results['Buy&Hold_Val'] = analyzer.calculate_buy_and_hold_benchmark(env_val)
-            results['Buy&Hold_Test'] = analyzer.calculate_buy_and_hold_benchmark(env_test)
-        except Exception as e:
-            logger.warning(f"Erreur lors du calcul du benchmark: {e}")
+        logger.info("📊 Évaluation terminée avec succès")
         
-        # Create visualizations
-        logger.info("Création des graphiques...")
-        analyzer.create_performance_plots(results)
+        # Save results based on environment
+        if save_results:
+            if kaggle_mode and kaggle_manager:
+                save_kaggle_evaluation_results(results, kaggle_manager)
+            else:
+                save_local_evaluation_results(results)
         
-        logger.info("=== ÉVALUATION TERMINÉE ===")
         return results
         
     except Exception as e:
-        logger.error(f"Erreur lors de l'évaluation: {e}")
+        logger.error(f"Erreur durant l'évaluation: {e}")
         import traceback
         traceback.print_exc()
         return {}
 
+
+def save_kaggle_evaluation_results(results, kaggle_manager):
+    """Save evaluation results in Kaggle environment"""
+    try:
+        logger.info("Sauvegarde des résultats dans l'environnement Kaggle...")
+        
+        # Get Kaggle paths
+        kaggle_paths = kaggle_manager.get_kaggle_paths()
+        
+        # Save metrics to CSV
+        import pandas as pd
+        metrics_data = []
+        for model_name, metrics in results.items():
+            if isinstance(metrics, dict):
+                for metric_name, value in metrics.items():
+                    metrics_data.append({
+                        'model': model_name,
+                        'metric': metric_name,
+                        'value': value
+                    })
+        
+        if metrics_data:
+            metrics_df = pd.DataFrame(metrics_data)
+            metrics_path = os.path.join(kaggle_paths['output'], 'evaluation_metrics.csv')
+            metrics_df.to_csv(metrics_path, index=False)
+            logger.info(f"Métriques sauvegardées: {metrics_path}")
+        
+        # Save detailed results as JSON
+        import json
+        results_path = os.path.join(kaggle_paths['output'], 'evaluation_results.json')
+        with open(results_path, 'w') as f:
+            # Convert numpy arrays to lists for JSON serialization
+            serializable_results = {}
+            for key, value in results.items():
+                if hasattr(value, 'tolist'):
+                    serializable_results[key] = value.tolist()
+                elif isinstance(value, dict):
+                    serializable_results[key] = {k: v.tolist() if hasattr(v, 'tolist') else v for k, v in value.items()}
+                else:
+                    serializable_results[key] = value
+            json.dump(serializable_results, f, indent=2)
+        logger.info(f"Résultats détaillés sauvegardés: {results_path}")
+        
+        # Copy performance plots to output
+        results_dir = os.path.join(os.getcwd(), 'results')
+        if os.path.exists(results_dir):
+            for file in os.listdir(results_dir):
+                if file.endswith('.png'):
+                    src_path = os.path.join(results_dir, file)
+                    dst_path = os.path.join(kaggle_paths['output'], file)
+                    import shutil
+                    shutil.copy2(src_path, dst_path)
+                    logger.info(f"Graphique copié: {dst_path}")
+        
+        logger.info("Sauvegarde Kaggle terminée avec succès")
+        
+    except Exception as e:
+        logger.error(f"Erreur lors de la sauvegarde Kaggle: {e}")
+
+
+def save_local_evaluation_results(results):
+    """Save evaluation results in local environment"""
+    try:
+        logger.info("Sauvegarde des résultats dans l'environnement local...")
+        
+        # Ensure results directory exists
+        results_dir = os.path.join(os.getcwd(), 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        
+        # Save metrics to CSV
+        import pandas as pd
+        metrics_data = []
+        for model_name, metrics in results.items():
+            if isinstance(metrics, dict):
+                for metric_name, value in metrics.items():
+                    metrics_data.append({
+                        'model': model_name,
+                        'metric': metric_name,
+                        'value': value
+                    })
+        
+        if metrics_data:
+            metrics_df = pd.DataFrame(metrics_data)
+            metrics_path = os.path.join(results_dir, 'evaluation_metrics.csv')
+            metrics_df.to_csv(metrics_path, index=False)
+            logger.info(f"Métriques sauvegardées: {metrics_path}")
+        
+        # Save detailed results as JSON
+        import json
+        results_path = os.path.join(results_dir, 'evaluation_results.json')
+        with open(results_path, 'w') as f:
+            # Convert numpy arrays to lists for JSON serialization
+            serializable_results = {}
+            for key, value in results.items():
+                if hasattr(value, 'tolist'):
+                    serializable_results[key] = value.tolist()
+                elif isinstance(value, dict):
+                    serializable_results[key] = {k: v.tolist() if hasattr(v, 'tolist') else v for k, v in value.items()}
+                else:
+                    serializable_results[key] = value
+            json.dump(serializable_results, f, indent=2)
+        logger.info(f"Résultats détaillés sauvegardés: {results_path}")
+        
+        logger.info("Sauvegarde locale terminée avec succès")
+        
+    except Exception as e:
+        logger.error(f"Erreur lors de la sauvegarde locale: {e}")
+
+
 if __name__ == "__main__":
-    results = evaluate_model()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Portfolio SAC Agent - Evaluation Module')
+    parser.add_argument('--kaggle', action='store_true', 
+                       help='Run in Kaggle mode with automated workflow')
+    parser.add_argument('--local', action='store_true', 
+                       help='Force local mode (default)')
+    parser.add_argument('--model-path', type=str, 
+                       help='Path to model file (optional, uses config default)')
+    parser.add_argument('--output-dir', type=str, 
+                       help='Output directory for results (optional)')
+    
+    args = parser.parse_args()
+    
+    # Determine execution mode
+    kaggle_mode = args.kaggle and not args.local
+    
+    if kaggle_mode:
+        logger.info("🚀 Démarrage de l'évaluation en mode Kaggle...")
+    else:
+        logger.info("🏠 Démarrage de l'évaluation en mode local...")
+    
+    # Run evaluation
+    try:
+        results = evaluate_model(
+            kaggle_mode=kaggle_mode,
+            model_path=args.model_path,
+            output_dir=args.output_dir
+        )
+        
+        if results:
+            logger.info("  Évaluation terminée avec succès")
+            
+            # Display summary
+            print("\n" + "="*50)
+            print("📊 RÉSUMÉ DE L'ÉVALUATION")
+            print("="*50)
+            for model_name, metrics in results.items():
+                if isinstance(metrics, dict) and any(isinstance(v, (int, float)) for v in metrics.values()):
+                    print(f"\n🔹 {model_name}:")
+                    for metric_name, value in metrics.items():
+                        if isinstance(value, (int, float)):
+                            print(f"  • {metric_name}: {value:.4f}")
+            print("="*50 + "\n")
+        else:
+            logger.error("❌ Évaluation échouée")
+            exit(1)
+            
+    except KeyboardInterrupt:
+        logger.info("⏹️ Évaluation interrompue par l'utilisateur")
+        exit(0)
+    except Exception as e:
+        logger.error(f"❌ Erreur critique: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)

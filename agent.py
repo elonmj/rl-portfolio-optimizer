@@ -13,23 +13,25 @@ from typing import Tuple, Dict, Any, Optional
 import copy
 
 from config import Config
-from models import SACModels
+from models import create_sac_models
 
 class ReplayBuffer:
     """Buffer de replay pour SAC"""
     
-    def __init__(self, capacity: int, state_dim: int, action_dim: int, device: str = "cpu"):
+    def __init__(self, capacity: int, state_dim: int, action_dim: int, device: torch.device = None):
+        if device is None:
+            device = Config.init_device()
         self.capacity = capacity
         self.device = device
         self.position = 0
         self.size = 0
         
         # Pré-allouer les tensors pour l'efficacité
-        self.states = torch.zeros(capacity, state_dim, device=device)
-        self.actions = torch.zeros(capacity, action_dim, device=device)
-        self.rewards = torch.zeros(capacity, 1, device=device)
-        self.next_states = torch.zeros(capacity, state_dim, device=device)
-        self.dones = torch.zeros(capacity, 1, dtype=torch.bool, device=device)
+        self.states = torch.zeros(capacity, state_dim, device=self.device)
+        self.actions = torch.zeros(capacity, action_dim, device=self.device)
+        self.rewards = torch.zeros(capacity, 1, device=self.device)
+        self.next_states = torch.zeros(capacity, state_dim, device=self.device)
+        self.dones = torch.zeros(capacity, 1, dtype=torch.bool, device=self.device)
     
     def push(self, state: np.ndarray, action: np.ndarray, reward: float, 
              next_state: np.ndarray, done: bool):
@@ -74,9 +76,12 @@ class SACAgent:
                  num_assets: int,
                  state_dim: int,
                  action_dim: int,
-                 device: str = "cpu",
+                 device: torch.device = None,
                  target_entropy: Optional[float] = None):
         
+        if device is None:
+            device = Config.init_device()
+            
         self.num_assets = num_assets
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -86,23 +91,33 @@ class SACAgent:
         self.target_entropy = target_entropy or -action_dim
         
         # Initialiser les modèles
-        self.models = SACModels(num_assets, device)
+        # Créer les modèles SAC simplifiés
+        models_dict = create_sac_models(num_assets, device)
+        self.actor = models_dict['actor']
+        self.critic1 = models_dict['critic1']
+        self.critic2 = models_dict['critic2']
+        self.target_critic1 = models_dict['target_critic1']
+        self.target_critic2 = models_dict['target_critic2']
+        
+        # Temperature parameter pour SAC
+        self.log_alpha = torch.tensor(0.0, requires_grad=True, device=device)
+        self.alpha = self.log_alpha.exp()
         
         # Optimizers
         self.actor_optimizer = optim.Adam(
-            self.models.actor.parameters(), 
+            self.actor.parameters(), 
             lr=Config.ACTOR_LR
         )
         self.critic1_optimizer = optim.Adam(
-            self.models.critic1.parameters(), 
+            self.critic1.parameters(), 
             lr=Config.CRITIC_LR
         )
         self.critic2_optimizer = optim.Adam(
-            self.models.critic2.parameters(), 
+            self.critic2.parameters(), 
             lr=Config.CRITIC_LR
         )
         self.alpha_optimizer = optim.Adam(
-            [self.models.log_alpha], 
+            [self.log_alpha], 
             lr=Config.ALPHA_LR
         )
         
@@ -111,7 +126,7 @@ class SACAgent:
             capacity=Config.REPLAY_BUFFER_SIZE,
             state_dim=state_dim,
             action_dim=action_dim,
-            device=device
+            device=self.device
         )
         
         # Compteurs et statistiques
@@ -121,7 +136,7 @@ class SACAgent:
         self.alpha_losses = deque(maxlen=1000)
         self.q_values = deque(maxlen=1000)
         
-        print(f"✅ Agent SAC initialisé:")
+        print(f"  Agent SAC initialisé:")
         print(f"   State dim: {state_dim}")
         print(f"   Action dim: {action_dim}")
         print(f"   Target entropy: {self.target_entropy:.2f}")
@@ -300,7 +315,7 @@ class SACAgent:
         }
         
         torch.save(save_dict, filepath)
-        print(f"✅ Agent sauvegardé dans {filepath}")
+        print(f"  Agent sauvegardé dans {filepath}")
     
     def load(self, filepath: str):
         """Charge l'agent complet"""
@@ -324,7 +339,7 @@ class SACAgent:
         self.training_step = checkpoint['training_step']
         self.target_entropy = checkpoint['target_entropy']
         
-        print(f"✅ Agent chargé depuis {filepath}")
+        print(f"  Agent chargé depuis {filepath}")
 
 
 def test_agent():
@@ -341,8 +356,7 @@ def test_agent():
     agent = SACAgent(
         num_assets=num_assets,
         state_dim=state_dim,
-        action_dim=action_dim,
-        device="cpu"
+        action_dim=action_dim
     )
     
     # Simuler quelques transitions
@@ -377,12 +391,12 @@ def test_agent():
         print(f"  {key}: {value:.4f}")
     
     # Test de sauvegarde/chargement
-    print("\n💾 Test sauvegarde/chargement...")
+    print("\n  Test sauvegarde/chargement...")
     save_path = "test_agent.pth"
     agent.save(save_path)
     
     # Créer un nouvel agent et charger
-    new_agent = SACAgent(num_assets, state_dim, action_dim, device="cpu")
+    new_agent = SACAgent(num_assets, state_dim, action_dim)
     new_agent.load(save_path)
     
     # Vérifier que les actions sont similaires
@@ -398,7 +412,7 @@ def test_agent():
     if os.path.exists(save_path):
         os.remove(save_path)
     
-    print("\n✅ Test de l'agent terminé avec succès!")
+    print("\n  Test de l'agent terminé avec succès!")
 
 
 if __name__ == "__main__":

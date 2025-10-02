@@ -1,24 +1,60 @@
 """
 Script d'entraînement de l'agent SAC pour la gestion de portefeuille.
 Implémente la boucle d'entraînement et validation selon spec.md.
+Intègre le support Kaggle pour l'exécution GPU distante.
 """
 
 import os
+import sys
 import time
 import json
+import shutil
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Dict, List, Tuple
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, List, Tuple, Optional
 import torch
 from tqdm import tqdm
 import warnings
 warnings.filterwarnings('ignore')
 
-from config import Config
+# Kaggle compatibility: Add current directory to Python path
+if '/kaggle' in os.getcwd():
+    sys.path.insert(0, '/kaggle/src')
+    sys.path.insert(0, '/kaggle/working')
+    print(f"Kaggle environment detected. Working directory: {os.getcwd()}")
+    print(f"Python path: {sys.path[:5]}")  # Show first 5 paths
+    
+    # List files in current directory for debugging
+    try:
+        import os
+        print(f"Files in /kaggle/src: {os.listdir('/kaggle/src')}")
+    except:
+        print("Could not list /kaggle/src files")
+
+try:
+    from config import Config
+    print("  Successfully imported Config")
+except ImportError as e:
+    print(f"❌ Failed to import Config: {e}")
+    # Fallback for debugging
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Files in current directory: {os.listdir('.')}")
+    raise
+
 from data_processing import DataHandler, FeatureProcessor
 from environment import PortfolioEnv
 from agent import SACAgent
+
+# Kaggle integration (optional import)
+try:
+    from kaggle_manager import KaggleManager, KaggleConfig
+    KAGGLE_AVAILABLE = True
+except ImportError:
+    KAGGLE_AVAILABLE = False
+    print("Kaggle integration not available. Running in local mode only.")
 
 class TrainingLogger:
     """Logger pour l'entraînement"""
@@ -41,13 +77,18 @@ class TrainingLogger:
             'cvar': []
         }
         
+    # train.py -> class TrainingLogger
+
     def log_episode(self, episode: int, metrics: Dict):
-        """Enregistre les métriques d'un épisode"""
+        """Enregistre les métriques d'un épisode de manière robuste"""
         self.metrics['episode'].append(episode)
-        for key, value in metrics.items():
-            if key in self.metrics:
-                self.metrics[key].append(value)
-    
+        # Parcourir toutes les clés de métriques possibles
+        for key in self.metrics:
+            if key != 'episode':
+                # Utiliser .get(key, None) pour ajouter la valeur si elle existe, ou None sinon.
+                # Cela garantit que toutes les listes ont la même longueur.
+                self.metrics[key].append(metrics.get(key, None))
+        
     def save_metrics(self):
         """Sauvegarde les métriques en CSV"""
         df = pd.DataFrame(self.metrics)
@@ -105,25 +146,51 @@ class TrainingLogger:
 
 
 class PortfolioTrainer:
-    """Classe principale pour l'entraînement de l'agent SAC"""
+    """Classe principale pour l'entraînement de l'agent SAC avec support Kaggle"""
     
-    def __init__(self, config_overrides: Dict = None):
+    def __init__(self, config_overrides: Dict = None, kaggle_mode: bool = None):
         self.config = Config()
         if config_overrides:
             for key, value in config_overrides.items():
                 setattr(self.config, key, value)
         
+        # Kaggle integration setup
+        self.kaggle_mode = kaggle_mode if kaggle_mode is not None else Config.is_kaggle_environment()
+        self.execution_mode = Config.get_execution_mode()
+        self.kaggle_manager = None
+        
+        if self.kaggle_mode and KAGGLE_AVAILABLE:
+            try:
+                self.kaggle_manager = KaggleManager()
+                print(f"🚀 Kaggle mode activated - Execution: {self.execution_mode}")
+            except Exception as e:
+                print(f"⚠️ Kaggle manager failed to initialize: {e}")
+                self.kaggle_mode = False
+        
+        # Setup environment-specific paths
+        Config.setup_environment_paths()
+        self.paths = Config.get_data_paths()
+        
         # Initialiser les composants
         self.data_handler = DataHandler()
         self.feature_processor = FeatureProcessor(self.data_handler)
         
-        # Créer les répertoires nécessaires
-        os.makedirs(Config.LOG_DIR, exist_ok=True)
-        os.makedirs(Config.MODEL_DIR, exist_ok=True)
-        os.makedirs(Config.RESULTS_DIR, exist_ok=True)
+        # Créer les répertoires nécessaires avec paths adaptés
+        os.makedirs(self.paths['logs'], exist_ok=True)
+        os.makedirs(self.paths['models'], exist_ok=True)
+        os.makedirs(self.paths['results'], exist_ok=True)
         
-        # Logger
-        self.logger = TrainingLogger(Config.LOG_DIR)
+        # Logger with environment-specific path
+        self.logger = TrainingLogger(self.paths['logs'])
+        
+        # Kaggle-specific configuration
+        if self.kaggle_mode:
+            self.kaggle_config = Config.get_kaggle_config()
+            self.training_config = Config.get_training_config_for_environment()
+            print(f"📋 Kaggle training config: {self.training_config}")
+        else:
+            self.kaggle_config = None
+            self.training_config = Config.get_training_config_for_environment()
         
         # Variables d'état
         self.train_env = None
@@ -146,7 +213,7 @@ class PortfolioTrainer:
         )
         
         # Limiter le nombre de tickers pour l'entraînement
-        max_tickers = min(len(train_tickers), 15)  # Maximum 15 tickers
+        max_tickers = min(len(train_tickers), 6)  # Maximum 6 tickers
         self.train_tickers = train_tickers[:max_tickers]
         
         print(f"   Tickers sélectionnés pour l'entraînement: {len(self.train_tickers)}")
@@ -182,27 +249,138 @@ class PortfolioTrainer:
             self.val_env = None
     
     def setup_agent(self):
-        """Configure l'agent SAC"""
+        """Configure l'agent SAC avec support Kaggle"""
         print("🤖 Configuration de l'agent SAC...")
-        
+
         if self.train_env is None:
             raise ValueError("Environnement d'entraînement non configuré")
-        
+
         # Dimensions
         num_assets = len(self.train_tickers)
         state_dim = self.train_env.observation_space.shape[0]
         action_dim = self.train_env.action_space.shape[0]
+
+        # Device selection logic:
+        # --kaggle mode: Force GPU if available (simulate Kaggle environment)
+        # --local mode: Use standard device detection
+        if self.kaggle_mode:
+            # Kaggle workflow mode: prioritize GPU for Kaggle-like configuration
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+                print(f"🚀 Kaggle workflow: GPU CUDA activé (simulation environnement Kaggle)")
+            else:
+                device = torch.device("cpu") 
+                print(f"⚠️ Kaggle workflow: GPU non disponible, utilisation CPU")
+        else:
+            # Local mode: use standard device detection
+            device = Config.init_device()
+            print(f"🏠 Mode local: device standard détecté")
         
-        # Créer l'agent
-        device = "cuda" if torch.cuda.is_available() and Config.DEVICE == "cuda" else "cpu"
-        print(f"   Utilisation du device: {device}")
-        
+        print(f"🖥️ Device final: {device}")
+
+        # Création de l'agent
         self.agent = SACAgent(
             num_assets=num_assets,
             state_dim=state_dim,
             action_dim=action_dim,
             device=device
         )
+        
+        # Log Kaggle-specific configuration
+        if self.kaggle_mode:
+            print(f"🚀 Kaggle GPU enabled: {self.kaggle_config.get('enable_gpu', False)}")
+            print(f"🌐 Kaggle Internet: {self.kaggle_config.get('enable_internet', False)}")
+    
+    def generate_kaggle_kernel_metadata(self, 
+                                       task_type: str = "training",
+                                       description: Optional[str] = None) -> Optional[str]:
+        """
+        Generate kernel metadata for Kaggle submission.
+        
+        Args:
+            task_type: Type of task (training, evaluation, etc.)
+            description: Custom description for the kernel
+            
+        Returns:
+            Path to generated metadata file or None if not in Kaggle mode
+        """
+        if not self.kaggle_mode or not self.kaggle_manager:
+            return None
+            
+        kernel_name = self.kaggle_manager.generate_kernel_name(task_type)
+        title = f"RL Portfolio Optimizer - {task_type.title()}"
+        
+        if description is None:
+            description = (
+                f"SAC Agent Portfolio Optimization - {task_type} phase with GPU acceleration. "
+                f"Using {len(self.train_tickers)} assets for portfolio management with "
+                f"CVaR risk management and technical indicators."
+            )
+        
+        # Custom configuration for this specific task
+        custom_config = {
+            "enable_gpu": self.kaggle_config.get('enable_gpu', True),
+            "enable_internet": self.kaggle_config.get('enable_internet', True),
+            "keywords": self.kaggle_config.get('keywords', []) + [task_type, "sac-agent"],
+            "description": description
+        }
+        
+        metadata = self.kaggle_manager.create_kernel_metadata(
+            kernel_name=kernel_name,
+            title=title,
+            code_file="train.py",
+            description=description,
+            custom_config=custom_config
+        )
+        
+        # Save metadata to working directory
+        metadata_path = self.kaggle_manager.save_kernel_metadata(
+            metadata, self.paths['working']
+        )
+        
+        print(f"📄 Kernel metadata generated: {metadata_path}")
+        return metadata_path
+    
+    def save_kaggle_results(self, final_stats: Dict, training_metrics: pd.DataFrame) -> None:
+        """
+        Save training results in Kaggle-compatible format.
+        
+        Args:
+            final_stats: Final training statistics
+            training_metrics: Training metrics DataFrame
+        """
+        if not self.kaggle_mode:
+            return
+            
+        results_dir = self.paths['results']
+        
+        # Save comprehensive results JSON
+        kaggle_results = {
+            'execution_mode': self.execution_mode,
+            'kaggle_config': self.kaggle_config,
+            'training_config': self.training_config,
+            'tickers_used': self.train_tickers,
+            'final_statistics': final_stats,
+            'training_summary': {
+                'total_episodes': len(training_metrics),
+                'best_reward': training_metrics['total_reward'].max() if not training_metrics.empty else 0,
+                'final_portfolio_value': training_metrics['portfolio_value'].iloc[-1] if not training_metrics.empty else 0,
+                'device_used': str(Config.get_device_for_kaggle()),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        }
+        
+        results_file = os.path.join(results_dir, 'kaggle_training_results.json')
+        with open(results_file, 'w') as f:
+            json.dump(kaggle_results, f, indent=2, default=str)
+            
+        print(f"  Kaggle results saved to: {results_file}")
+        
+        # Also save metrics in standard CSV format for easy analysis
+        metrics_file = os.path.join(results_dir, 'training_metrics_kaggle.csv')
+        training_metrics.to_csv(metrics_file, index=False)
+        print(f"📊 Training metrics saved to: {metrics_file}")
+
     
     def train_episode(self, episode: int) -> Dict:
         """Entraîne l'agent sur un épisode"""
@@ -315,13 +493,37 @@ class PortfolioTrainer:
         
         return np.max(drawdown)
     
-    def train(self, num_episodes: int = Config.MAX_EPISODES):
-        """Boucle principale d'entraînement"""
-        print(f"🏋️ Démarrage de l'entraînement pour {num_episodes} épisodes")
+    def train(self, num_episodes: int = None):
+        """Boucle principale d'entraînement avec support Kaggle"""
+        # PRIORITY: Explicit parameter > Environment config > Default config
+        if num_episodes is None:
+            # No explicit parameter - use environment-specific configuration
+            num_episodes = self.training_config.get('max_episodes', Config.MAX_EPISODES)
+        else:
+            # Explicit parameter provided - use it (highest priority)
+            print(f"� Using explicit num_episodes parameter: {num_episodes} (overriding config)")
+            
+        print(f"�🏋️ Démarrage de l'entraînement pour {num_episodes} épisodes")
+        print(f"🌍 Environnement: {self.execution_mode}")
+        print(f"🚀 Workflow Kaggle: {'Oui' if self.kaggle_mode else 'Non'}")
+        
+        # Debug: Show configuration source for transparency
+        env_episodes = self.training_config.get('max_episodes', Config.MAX_EPISODES)
+        if num_episodes != env_episodes:
+            print(f"📝 Note: Environment config suggests {env_episodes} episodes, but using explicit {num_episodes}")
+        else:
+            print(f"📝 Note: Using environment config: {num_episodes} episodes")
         
         # Configuration
         self.setup_environments()
         self.setup_agent()
+        
+        # Generate Kaggle kernel metadata if in Kaggle mode (after environment setup)
+        if self.kaggle_mode:
+            self.generate_kaggle_kernel_metadata("training")
+        
+        # Log environment info
+        Config.log_environment_info()
         
         start_time = time.time()
         
@@ -331,21 +533,26 @@ class PortfolioTrainer:
             
             # Validation périodique
             val_metrics = {}
-            if episode % Config.EVAL_FREQUENCY == 0:
+            eval_freq = self.training_config.get('eval_frequency', Config.EVAL_FREQUENCY)
+            if episode % eval_freq == 0:
                 val_metrics = self.validate_agent()
                 
-                # Sauvegarder le meilleur modèle
+                # Sauvegarder le meilleur modèle avec path adapté
                 val_return = val_metrics.get('val_total_return', -np.inf)
                 if val_return > self.best_val_return:
                     self.best_val_return = val_return
-                    self.agent.save(os.path.join(Config.MODEL_DIR, 'best_model.pth'))
+                    best_model_path = os.path.join(self.paths['models'], 'best_model.pth')
+                    self.agent.save(best_model_path)
+                    if self.kaggle_mode:
+                        print(f"💎 New best model saved: {best_model_path}")
             
             # Logger les métriques
             all_metrics = {**train_metrics, **val_metrics}
             self.logger.log_episode(episode, all_metrics)
             
-            # Affichage périodique
-            if episode % 10 == 0:
+            # Affichage périodique (plus fréquent en mode Kaggle pour monitoring)
+            display_freq = 5 if self.kaggle_mode else 10
+            if episode % display_freq == 0:
                 train_return = train_metrics.get('total_return', 0)
                 val_return = val_metrics.get('val_total_return', 0)
                 print(f"\nÉpisode {episode}:")
@@ -353,20 +560,32 @@ class PortfolioTrainer:
                 if val_metrics:
                     print(f"  Val Return: {val_return:.2%}")
                     print(f"  Val Sharpe: {val_metrics.get('val_sharpe_ratio', 0):.2f}")
+                
+                # Kaggle-specific monitoring
+                if self.kaggle_mode:
+                    portfolio_value = train_metrics.get('portfolio_value', Config.INITIAL_CASH)
+                    print(f"  Portfolio Value: {portfolio_value:,.0f} FCFA")
+                    print(f"  Device: {Config.get_device_for_kaggle()}")
             
-            # Sauvegarde périodique
-            if episode % Config.SAVE_FREQUENCY == 0 and episode > 0:
-                self.agent.save(os.path.join(Config.MODEL_DIR, f'model_episode_{episode}.pth'))
+            # Sauvegarde périodique avec path adapté
+            save_freq = self.training_config.get('save_frequency', Config.SAVE_FREQUENCY)
+            if episode % save_freq == 0 and episode > 0:
+                model_path = os.path.join(self.paths['models'], f'model_episode_{episode}.pth')
+                self.agent.save(model_path)
                 self.logger.save_metrics()
                 self.logger.plot_training_curves()
+                
+                if self.kaggle_mode:
+                    print(f"  Checkpoint saved: episode {episode}")
         
         # Fin de l'entraînement
         total_time = time.time() - start_time
-        print(f"\n✅ Entraînement terminé en {total_time/60:.1f} minutes")
+        print(f"\n  Entraînement terminé en {total_time/60:.1f} minutes")
         print(f"   Meilleur retour validation: {self.best_val_return:.2%}")
         
-        # Sauvegarde finale
-        self.agent.save(os.path.join(Config.MODEL_DIR, 'final_model.pth'))
+        # Sauvegarde finale avec path adapté
+        final_model_path = os.path.join(self.paths['models'], 'final_model.pth')
+        self.agent.save(final_model_path)
         self.logger.save_metrics()
         self.logger.plot_training_curves()
         
@@ -376,40 +595,171 @@ class PortfolioTrainer:
         for key, value in final_stats.items():
             print(f"  {key}: {value:.4f}")
         
+        # Kaggle-specific result saving
+        if self.kaggle_mode:
+            training_df = pd.DataFrame(self.logger.metrics)
+            self.save_kaggle_results(final_stats, training_df)
+            print(f"🚀 Kaggle training completed successfully!")
+            print(f"📁 Results saved in: {self.paths['results']}")
+        
         return self.logger.metrics
 
 
-def main():
-    """Fonction principale d'entraînement"""
-    print("🎯 Démarrage de l'entraînement de l'agent SAC pour la gestion de portefeuille")
+def main(num_episodes: Optional[int] = None, kaggle_mode: bool = False, github_mode: bool = False):
+    """
+    Fonction principale d'entraînement avec support Kaggle
     
-    # Configuration personnalisée pour un entraînement plus rapide
-    config_overrides = {
-        'MAX_EPISODES': 200,  # Réduire pour le test
-        'EVAL_FREQUENCY': 20,
-        'SAVE_FREQUENCY': 50,
-        'BATCH_SIZE': 64,  # Réduire la taille de batch
-    }
+    Args:
+        num_episodes: Number of training episodes (None for config default)
+        kaggle_mode: Active le workflow Kaggle API (upload/monitoring/download)
+        github_mode: Active le mode GitHub pour tests
+    """
+    print("  Démarrage de l'entraînement de l'agent SAC pour la gestion de portefeuille")
     
-    # Créer et lancer l'entraîneur
-    trainer = PortfolioTrainer(config_overrides)
+    # Real execution environment detection (where the code actually runs)
+    execution_environment = Config.get_execution_mode()  # 'local' or 'kaggle'
     
-    try:
-        metrics = trainer.train(num_episodes=config_overrides['MAX_EPISODES'])
-        print("\n🎉 Entraînement réussi!")
+    # Workflow mode (whether to use Kaggle API and automation)
+    if kaggle_mode is None:
+        kaggle_mode = False  # By default, use local workflow
+    
+    print(f"� Environnement d'exécution: {execution_environment}")
+    print(f"🚀 Workflow Kaggle: {'Activé' if kaggle_mode else 'Désactivé'}")
+    
+    # Configuration selon le workflow choisi
+    if kaggle_mode:
+        # Configuration optimisée pour execution Kaggle (GPU + plus d'épisodes)
+        config_overrides = {
+            'MAX_EPISODES': num_episodes or 500,  # Plus d'épisodes avec GPU
+            'EVAL_FREQUENCY': 25,
+            'SAVE_FREQUENCY': 50,
+            'BATCH_SIZE': 256,  # Batch size optimisé pour GPU
+        }
+        print("⚡ Configuration pour workflow Kaggle (GPU optimisé)")
+    else:
+        # Configuration pour workflow local standard
+        config_overrides = {
+            'MAX_EPISODES': num_episodes or 200,  # Test local plus rapide
+            'EVAL_FREQUENCY': 20,
+            'SAVE_FREQUENCY': 50,
+            'BATCH_SIZE': 64,  # Batch size adapté au CPU local
+        }
+        print("🏠 Configuration pour workflow local standard")
+    
+    # Workflow Kaggle : upload + execution distante + monitoring + download
+    if kaggle_mode:
         
-        # Afficher quelques métriques finales
-        if metrics['total_return']:
-            final_return = metrics['total_return'][-1]
-            max_return = max(metrics['total_return'])
-            print(f"   Retour final: {final_return:.2%}")
-            print(f"   Meilleur retour: {max_return:.2%}")
+        # Créer le manager Kaggle
+        kaggle_manager = KaggleManager()
         
-    except Exception as e:
-        print(f"❌ Erreur durant l'entraînement: {e}")
-        import traceback
-        traceback.print_exc()
+        if github_mode:
+            print("🚀 Lancement du workflow Kaggle + GitHub...")
+            
+            try:
+                # Nouveau workflow GitHub (plus fiable)
+                results = kaggle_manager.create_and_upload_notebook_github(
+                    repo_url="https://github.com/elonmj/rl-portfolio-optimizer.git",
+                    branch="feature/training-config-updates",
+                    task_type="training",
+                    timeout=3600,  # 1 hour timeout
+                    check_interval=30  # Check every 30s
+                )
+            except Exception as e:
+                print(f"❌ Erreur du workflow GitHub: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+        
+        else:
+            print("🚀 Lancement du workflow Dataset + Notebook...")
+            
+            # Préparer les fichiers à uploader
+            source_files = [
+                "train.py", "config.py", "agent.py", "models.py", 
+                "environment.py", "data_processing.py", "utils.py"
+            ]
+            data_files = ["datas", "requirements.txt"]
+            
+            try:
+                # Workflow Dataset + Notebook (ancien système)
+                results = kaggle_manager.create_dataset_and_notebook_workflow(
+                    source_files=source_files,
+                    data_files=data_files,
+                    task_type="training",
+                    episodes=config_overrides['MAX_EPISODES']
+                )
+            except Exception as e:
+                print(f"❌ Erreur du workflow Dataset + Notebook: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+            
+            print(f"\n🎉 Workflow Dataset + Notebook terminé avec succès!")
+            print(f"� Dataset: https://www.kaggle.com/datasets/{results['dataset_slug']}")
+            print(f"📓 Notebook: https://www.kaggle.com/code/{results['kernel_slug']}")
+            print(f"📊 Episodes: {results['episodes']}")
+            print("\n📝 Instructions de monitoring:")
+            print("1. Allez sur l'URL du notebook ci-dessus")
+            print("2. Cliquez sur 'Run All' pour lancer l'entraînement") 
+            print("3. Surveillez les logs en temps réel")
+            print("4. Les résultats seront sauvegardés automatiquement")
+            
+            return results
+    
+    # Workflow local : execution standard sur la machine locale
+    else:
+        print("🏠 Lancement du workflow local...")
+        
+        # Créer et lancer l'entraîneur localement
+        trainer = PortfolioTrainer(config_overrides, kaggle_mode=False)
+        
+        try:
+            metrics = trainer.train(num_episodes=config_overrides['MAX_EPISODES'])
+            print("\n🎉 Entraînement local réussi!")
+            
+            # Afficher quelques métriques finales
+            if metrics['total_return']:
+                final_return = metrics['total_return'][-1]
+                max_return = max(metrics['total_return'])
+                print(f"   Retour final: {final_return:.2%}")
+                print(f"   Meilleur retour: {max_return:.2%}")
+                
+            final_value = metrics['portfolio_value'][-1] if metrics['portfolio_value'] else Config.INITIAL_CASH
+            print(f"   Valeur finale du portefeuille: {final_value:,.0f} FCFA")
+            print(f"   Device utilisé: {Config.get_device()}")
+            
+            return metrics
+            
+        except Exception as e:
+            print(f"❌ Erreur durant l'entraînement local: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Entraînement RL Portfolio Optimizer")
+    parser.add_argument('--kaggle', action='store_true', help='Force Kaggle mode (dataset-based)')
+    parser.add_argument('--kaggle-github', action='store_true', help='Kaggle mode with GitHub cloning')
+    parser.add_argument('--local', action='store_true', help='Force local mode')
+    parser.add_argument('--episodes', type=int, help='Number of training episodes')
+    
+    args = parser.parse_args()
+    
+    # Determine workflow mode
+    if args.kaggle:
+        kaggle_mode = True
+        github_mode = False
+    elif args.kaggle_github:
+        kaggle_mode = True  
+        github_mode = True
+    elif args.local:
+        kaggle_mode = False
+        github_mode = False
+    else:
+        kaggle_mode = False  # Default to local workflow
+        github_mode = False
+    
+    main(kaggle_mode=kaggle_mode, github_mode=github_mode, num_episodes=args.episodes)
