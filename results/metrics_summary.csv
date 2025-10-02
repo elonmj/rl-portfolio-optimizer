@@ -1,0 +1,5 @@
+,Rendement Total (%),Rendement Annualisé (%),Volatilité (%),Ratio de Sharpe,Ratio de Sortino,Maximum Drawdown (%),CVaR 5% (%),Valeur Finale (€),Nombre de Périodes
+Agent_Validation,38.19%,3.42%,6.24%,0.548,0.922,-21.57%,-1.70%,1381903,500
+Agent_Test,-6.60%,-0.71%,5.47%,-0.130,-0.209,-16.92%,-1.61%,933953,500
+Buy&Hold_Val,0.00%,0.00%,0.00%,0.000,0.000,0.00%,0.00%,1000000,0
+Buy&Hold_Test,0.00%,0.00%,0.00%,0.000,0.000,0.00%,0.00%,1000000,0

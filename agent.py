@@ -13,7 +13,7 @@ from typing import Tuple, Dict, Any, Optional
 import copy
 
 from config import Config
-from models import SACModels
+from models import create_sac_models
 
 class ReplayBuffer:
     """Buffer de replay pour SAC"""
@@ -91,23 +91,33 @@ class SACAgent:
         self.target_entropy = target_entropy or -action_dim
         
         # Initialiser les modèles
-        self.models = SACModels(num_assets, device)
+        # Créer les modèles SAC simplifiés
+        models_dict = create_sac_models(num_assets, device)
+        self.actor = models_dict['actor']
+        self.critic1 = models_dict['critic1']
+        self.critic2 = models_dict['critic2']
+        self.target_critic1 = models_dict['target_critic1']
+        self.target_critic2 = models_dict['target_critic2']
+        
+        # Temperature parameter pour SAC
+        self.log_alpha = torch.tensor(0.0, requires_grad=True, device=device)
+        self.alpha = self.log_alpha.exp()
         
         # Optimizers
         self.actor_optimizer = optim.Adam(
-            self.models.actor.parameters(), 
+            self.actor.parameters(), 
             lr=Config.ACTOR_LR
         )
         self.critic1_optimizer = optim.Adam(
-            self.models.critic1.parameters(), 
+            self.critic1.parameters(), 
             lr=Config.CRITIC_LR
         )
         self.critic2_optimizer = optim.Adam(
-            self.models.critic2.parameters(), 
+            self.critic2.parameters(), 
             lr=Config.CRITIC_LR
         )
         self.alpha_optimizer = optim.Adam(
-            [self.models.log_alpha], 
+            [self.log_alpha], 
             lr=Config.ALPHA_LR
         )
         

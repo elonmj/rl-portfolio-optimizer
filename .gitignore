@@ -154,8 +154,7 @@ autocomplete-*
 
 # Data
 logs/
-models/
-results/
+
 
 # Copilot
 .copilot-tracking/
